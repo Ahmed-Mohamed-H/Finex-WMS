@@ -1,5 +1,12 @@
+import { Button } from "@/components/ui/button";
+
 function App() {
-  return <h1>Finex SCE Platform</h1>;
+  return (
+    <div className="p-8">
+      <h1 className="text-2xl font-bold mb-4">Finex SCE Platform</h1>
+      <Button>Test Shadcn Button</Button>
+    </div>
+  );
 }
 
 export default App;

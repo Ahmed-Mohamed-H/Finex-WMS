@@ -1,1 +1,6 @@
-<Solution />
+<Solution>
+  <Project Path="Finex.API/Finex.API.csproj" />
+  <Project Path="Finex.Application/Finex.Application.csproj" />
+  <Project Path="Finex.Domain/Finex.Domain.csproj" />
+  <Project Path="Finex.Infrastructure/Finex.Infrastructure.csproj" />
+</Solution>
