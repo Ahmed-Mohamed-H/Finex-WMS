@@ -1,7 +1,9 @@
-﻿using Finex.Application.Interfaces;
+﻿using Finex.API.Observability;
+using Finex.Application.Interfaces;
 using Finex.Infrastructure.Security;
 using Microsoft.Extensions.Options;
 using Serilog.Context;
+using System.Diagnostics;
 using System.Text;
 
 namespace Finex.API.Middlewares
@@ -137,54 +139,74 @@ namespace Finex.API.Middlewares
             }
 
             string normalizedIdempotencyKey = idempotencyGuid.ToString("D");
+            var currentActivity = Activity.Current;
+            currentActivity?.SetTag("finex.idempotency_key", normalizedIdempotencyKey);
+            currentActivity?.SetTag("finex.client_ip", remoteIp);
 
             using (LogContext.PushProperty("IdempotencyKey", normalizedIdempotencyKey))
             using (LogContext.PushProperty("RemoteIp", remoteIp))
             {
-                bool isSignatureValid = HmacSignatureUtility.TryVerifyDualKey(
-                    providedHexSignature: signatureRaw,
-                    expectedHashFactory: secret => HmacSignatureUtility.ComputeCanonicalHmacBytes(
-                        method: HttpMethods.Post,
-                        path: requestPath,
-                        timestamp: timestampRaw,
-                        idempotencyKey: normalizedIdempotencyKey,
-                        bodyBytes: bodyBytes,
-                        secret: secret),
-                    currentSecret: options.CurrentSecret,
-                    previousSecret: options.PreviousSecret,
-                    out string? matchedSecret);
+                bool isUsingPreviousSecret;
+                string matchedSecret;
 
-                if (!isSignatureValid || matchedSecret is null)
+                using (var securitySpan = FinexDiagnostics.ActivitySource.StartActivity("Security.VerifyHmacAndReplay"))
                 {
-                    _logger.LogWarning(
-                        "Security violation [{SecurityEvent}]: Invalid HMAC signature for {IdempotencyKey} on {Path} from {RemoteIp}.",
-                        "InvalidSignature", normalizedIdempotencyKey, requestPath, remoteIp);
+                    bool isSignatureValid = HmacSignatureUtility.TryVerifyDualKey(
+                        providedHexSignature: signatureRaw,
+                        expectedHashFactory: secret => HmacSignatureUtility.ComputeCanonicalHmacBytes(
+                            method: HttpMethods.Post,
+                            path: requestPath,
+                            timestamp: timestampRaw,
+                            idempotencyKey: normalizedIdempotencyKey,
+                            bodyBytes: bodyBytes,
+                            secret: secret),
+                        currentSecret: options.CurrentSecret,
+                        previousSecret: options.PreviousSecret,
+                        out string? validSecret);
 
-                    await RejectAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized.");
-                    return;
-                }
+                    if (!isSignatureValid || validSecret is null)
+                    {
+                        securitySpan?.SetStatus(ActivityStatusCode.Error, "Invalid HMAC signature");
+                        FinexDiagnostics.SecurityViolationsCounter.Add(1, new KeyValuePair<string, object?>("reason", "InvalidSignature"));
 
-                bool isUsingPreviousSecret = matchedSecret == options.PreviousSecret;
-                if (isUsingPreviousSecret)
-                {
-                    _logger.LogWarning(
-                        "Security notice [{SecurityEvent}]: Request {IdempotencyKey} authenticated using rotated PreviousSecret on {Path} from {RemoteIp}.",
-                        "RotatedKeyUsed", normalizedIdempotencyKey, requestPath, remoteIp);
-                }
+                        _logger.LogWarning(
+                            "Security violation [{SecurityEvent}]: Invalid HMAC signature for {IdempotencyKey} on {Path} from {RemoteIp}.",
+                            "InvalidSignature", normalizedIdempotencyKey, requestPath, remoteIp);
 
-                bool isNonceClaimed = await _replayStore.TryConsumeNonceAsync(
-                    nonceKey: normalizedIdempotencyKey,
-                    ttl: TimeSpan.FromSeconds(options.AllowedClockSkewSeconds * 2),
-                    cancellationToken: context.RequestAborted);
+                        await RejectAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized.");
+                        return;
+                    }
 
-                if (!isNonceClaimed)
-                {
-                    _logger.LogWarning(
-                        "Security violation [{SecurityEvent}]: Replay or concurrent duplicate blocked for {IdempotencyKey} on {Path} from {RemoteIp}.",
-                        "ReplayBlocked", normalizedIdempotencyKey, requestPath, remoteIp);
+                    matchedSecret = validSecret;
+                    isUsingPreviousSecret = matchedSecret == options.PreviousSecret;
+                    securitySpan?.SetTag("finex.key_generation", isUsingPreviousSecret ? "Previous" : "Current");
 
-                    await RejectAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized.");
-                    return;
+                    if (isUsingPreviousSecret)
+                    {
+                        _logger.LogWarning(
+                            "Security notice [{SecurityEvent}]: Request {IdempotencyKey} authenticated using rotated PreviousSecret on {Path} from {RemoteIp}.",
+                            "RotatedKeyUsed", normalizedIdempotencyKey, requestPath, remoteIp);
+                    }
+
+                    bool isNonceClaimed = await _replayStore.TryConsumeNonceAsync(
+                        nonceKey: normalizedIdempotencyKey,
+                        ttl: TimeSpan.FromSeconds(options.AllowedClockSkewSeconds * 2),
+                        cancellationToken: context.RequestAborted);
+
+                    if (!isNonceClaimed)
+                    {
+                        securitySpan?.SetStatus(ActivityStatusCode.Error, "Replay blocked");
+                        FinexDiagnostics.SecurityViolationsCounter.Add(1, new KeyValuePair<string, object?>("reason", "ReplayBlocked"));
+
+                        _logger.LogWarning(
+                            "Security violation [{SecurityEvent}]: Replay or concurrent duplicate blocked for {IdempotencyKey} on {Path} from {RemoteIp}.",
+                            "ReplayBlocked", normalizedIdempotencyKey, requestPath, remoteIp);
+
+                        await RejectAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized.");
+                        return;
+                    }
+
+                    FinexDiagnostics.VerifiedRequestsCounter.Add(1, new KeyValuePair<string, object?>("key_generation", isUsingPreviousSecret ? "Previous" : "Current"));
                 }
 
                 Stream originalBodyStream = context.Response.Body;

@@ -1,4 +1,5 @@
 using Finex.API.Middlewares;
+using Finex.API.Observability.Extensions;
 using Finex.API.Security;
 using Finex.Application.Interfaces;
 using Finex.Infrastructure.Security;
@@ -38,6 +39,12 @@ try
     builder.Services.AddControllers();
     builder.Services.AddOpenApi();
 
+    builder.Services.AddHttpClient(Options.DefaultName, client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(3);
+    });
+
+    builder.AddFinexOpenTelemetry();
     var app = builder.Build();
 
     app.UseSerilogRequestLogging(options =>
