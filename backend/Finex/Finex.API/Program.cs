@@ -6,12 +6,17 @@ using Finex.Infrastructure.Security;
 using Microsoft.Extensions.Options;
 using Scalar.AspNetCore;
 using Serilog;
+using Serilog.Enrichers.Span;
 using Serilog.Events;
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
     .Enrich.FromLogContext()
+    .Enrich.WithSpan()
     .WriteTo.Console()
+    .WriteTo.Seq("http://localhost:5341", 
+    apiKey: "***REMOVED***"
+    )
     .CreateBootstrapLogger();
 
 try

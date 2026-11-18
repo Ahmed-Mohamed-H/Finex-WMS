@@ -41,100 +41,128 @@ namespace Finex.API.Middlewares
             var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
             var requestPath = context.Request.Path.Value ?? "/";
 
-            if (!HttpMethods.IsPost(context.Request.Method))
-            {
-                _logger.LogWarning(
-                    "Security violation [{SecurityEvent}]: Disallowed HTTP method {Method} on {Path} from {RemoteIp}.",
-                    "DisallowedMethod", context.Request.Method, requestPath, remoteIp);
-
-                context.Response.Headers.Allow = HttpMethods.Post;
-                await RejectAsync(context, StatusCodes.Status405MethodNotAllowed, "Method not allowed.");
-                return;
-            }
-
-            if (!TryGetSingleHeader(context.Request.Headers, HeaderTimestamp, out string timestampRaw) ||
-                !TryGetSingleHeader(context.Request.Headers, HeaderSignature, out string signatureRaw) ||
-                !TryGetSingleHeader(context.Request.Headers, HeaderIdempotencyKey, out string idempotencyKeyRaw))
-            {
-                _logger.LogWarning(
-                    "Security violation [{SecurityEvent}]: Missing or duplicate required headers on {Path} from {RemoteIp}.",
-                    "MissingHeaders", requestPath, remoteIp);
-
-                await RejectAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized.");
-                return;
-            }
-
-            if (!Guid.TryParseExact(idempotencyKeyRaw, "D", out Guid idempotencyGuid))
-            {
-                _logger.LogWarning(
-                    "Security violation [{SecurityEvent}]: Malformed {Header} format on {Path} from {RemoteIp}.",
-                    "MalformedIdempotencyKey", HeaderIdempotencyKey, requestPath, remoteIp);
-
-                await RejectAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized.");
-                return;
-            }
-
-            if (!long.TryParse(timestampRaw, out long unixTimestamp) ||
-                unixTimestamp < MinValidUnixSeconds ||
-                unixTimestamp > MaxValidUnixSeconds)
-            {
-                _logger.LogWarning(
-                    "Security violation [{SecurityEvent}]: Invalid {Header} value on {Path} from {RemoteIp}.",
-                    "InvalidTimestamp", HeaderTimestamp, requestPath, remoteIp);
-
-                await RejectAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized.");
-                return;
-            }
-
-            var requestTime = DateTimeOffset.FromUnixTimeSeconds(unixTimestamp);
-            double driftSeconds = Math.Abs((DateTimeOffset.UtcNow - requestTime).TotalSeconds);
-
-            if (driftSeconds > options.AllowedClockSkewSeconds)
-            {
-                _logger.LogWarning(
-                    "Security violation [{SecurityEvent}]: Timestamp outside allowed window (Drift: {DriftSeconds:F1}s) on {Path} from {RemoteIp}.",
-                    "ClockSkewExceeded", driftSeconds, requestPath, remoteIp);
-
-                await RejectAsync(context, StatusCodes.Status408RequestTimeout, "Request expired.");
-                return;
-            }
-
-            if (context.Request.ContentLength.HasValue && context.Request.ContentLength.Value > options.MaxPayloadBytes)
-            {
-                _logger.LogWarning(
-                    "Security violation [{SecurityEvent}]: Payload size {ContentLength} exceeds limit {MaxBytes} on {Path} from {RemoteIp}.",
-                    "PayloadTooLarge", context.Request.ContentLength.Value, options.MaxPayloadBytes, requestPath, remoteIp);
-
-                await RejectAsync(context, StatusCodes.Status413PayloadTooLarge, "Payload too large.");
-                return;
-            }
-
-            context.Request.EnableBuffering(
-                bufferThreshold: 32 * 1024,
-                bufferLimit: options.MaxPayloadBytes);
-
             byte[] bodyBytes;
-            try
-            {
-                bodyBytes = await ReadBoundedStreamAsync(
-                    context.Request.Body,
-                    options.MaxPayloadBytes,
-                    context.RequestAborted);
-            }
-            catch (InvalidOperationException)
-            {
-                _logger.LogWarning(
-                    "Security violation [{SecurityEvent}]: Streamed payload exceeded max limit {MaxBytes} on {Path} from {RemoteIp}.",
-                    "StreamPayloadTooLarge", options.MaxPayloadBytes, requestPath, remoteIp);
+            Guid idempotencyGuid;
+            string timestampRaw;
+            string signatureRaw;
 
-                await RejectAsync(context, StatusCodes.Status413PayloadTooLarge, "Payload too large.");
-                return;
-            }
-            finally
+            // 1. الشريط الفرعي الأول: الفحوصات الأولية وقراءة الـ Body Stream
+            using (var preCheckSpan = FinexDiagnostics.ActivitySource.StartActivity("Security.PreCheckAndReadBody"))
             {
-                if (context.Request.Body.CanSeek)
+                if (!HttpMethods.IsPost(context.Request.Method))
                 {
-                    context.Request.Body.Position = 0;
+                    RecordViolation("DisallowedMethod");
+                    preCheckSpan?.SetStatus(ActivityStatusCode.Error, "DisallowedMethod");
+                    _logger.LogWarning(
+                        "Security violation [{SecurityEvent}]: Disallowed HTTP method {Method} on {Path} from {RemoteIp}.",
+                        "DisallowedMethod", context.Request.Method, requestPath, remoteIp);
+
+                    context.Response.Headers.Allow = HttpMethods.Post;
+                    await RejectAsync(context, StatusCodes.Status405MethodNotAllowed, "Method not allowed.");
+                    return;
+                }
+
+                if (!TryGetSingleHeader(context.Request.Headers, HeaderTimestamp, out timestampRaw) ||
+                    !TryGetSingleHeader(context.Request.Headers, HeaderSignature, out signatureRaw) ||
+                    !TryGetSingleHeader(context.Request.Headers, HeaderIdempotencyKey, out string idempotencyKeyRaw))
+                {
+                    RecordViolation("MissingHeaders");
+                    preCheckSpan?.SetStatus(ActivityStatusCode.Error, "MissingHeaders");
+                    _logger.LogWarning(
+                        "Security violation [{SecurityEvent}]: Missing or duplicate required headers on {Path} from {RemoteIp}.",
+                        "MissingHeaders", requestPath, remoteIp);
+
+                    await RejectAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized.");
+                    return;
+                }
+
+                if (!Guid.TryParseExact(idempotencyKeyRaw, "D", out idempotencyGuid))
+                {
+                    RecordViolation("MalformedIdempotencyKey");
+                    preCheckSpan?.SetStatus(ActivityStatusCode.Error, "MalformedIdempotencyKey");
+                    _logger.LogWarning(
+                        "Security violation [{SecurityEvent}]: Malformed {Header} format on {Path} from {RemoteIp}.",
+                        "MalformedIdempotencyKey", HeaderIdempotencyKey, requestPath, remoteIp);
+
+                    await RejectAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized.");
+                    return;
+                }
+
+                if (!long.TryParse(timestampRaw, out long unixTimestamp) ||
+                    unixTimestamp < MinValidUnixSeconds ||
+                    unixTimestamp > MaxValidUnixSeconds)
+                {
+                    RecordViolation("InvalidTimestamp");
+                    preCheckSpan?.SetStatus(ActivityStatusCode.Error, "InvalidTimestamp");
+                    _logger.LogWarning(
+                        "Security violation [{SecurityEvent}]: Invalid {Header} value on {Path} from {RemoteIp}.",
+                        "InvalidTimestamp", HeaderTimestamp, requestPath, remoteIp);
+
+                    await RejectAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized.");
+                    return;
+                }
+
+                var requestTime = DateTimeOffset.FromUnixTimeSeconds(unixTimestamp);
+                double driftSeconds = Math.Abs((DateTimeOffset.UtcNow - requestTime).TotalSeconds);
+                preCheckSpan?.SetTag("security.clock_drift_sec", Math.Round(driftSeconds, 3));
+
+                if (driftSeconds > options.AllowedClockSkewSeconds)
+                {
+                    RecordViolation("ClockSkewExceeded");
+                    preCheckSpan?.SetStatus(ActivityStatusCode.Error, "ClockSkewExceeded");
+                    _logger.LogWarning(
+                        "Security violation [{SecurityEvent}]: Timestamp outside allowed window (Drift: {DriftSeconds:F1}s) on {Path} from {RemoteIp}.",
+                        "ClockSkewExceeded", driftSeconds, requestPath, remoteIp);
+
+                    await RejectAsync(context, StatusCodes.Status408RequestTimeout, "Request expired.");
+                    return;
+                }
+
+                if (context.Request.ContentLength.HasValue && context.Request.ContentLength.Value > options.MaxPayloadBytes)
+                {
+                    RecordViolation("PayloadTooLarge");
+                    preCheckSpan?.SetStatus(ActivityStatusCode.Error, "PayloadTooLarge");
+                    _logger.LogWarning(
+                        "Security violation [{SecurityEvent}]: Payload size {ContentLength} exceeds limit {MaxBytes} on {Path} from {RemoteIp}.",
+                        "PayloadTooLarge", context.Request.ContentLength.Value, options.MaxPayloadBytes, requestPath, remoteIp);
+
+                    await RejectAsync(context, StatusCodes.Status413PayloadTooLarge, "Payload too large.");
+                    return;
+                }
+
+                preCheckSpan?.AddEvent(new ActivityEvent("HeadersAndTimestampValidated"));
+
+                context.Request.EnableBuffering(
+                    bufferThreshold: 32 * 1024,
+                    bufferLimit: options.MaxPayloadBytes);
+
+                try
+                {
+                    bodyBytes = await ReadBoundedStreamAsync(
+                        context.Request.Body,
+                        options.MaxPayloadBytes,
+                        context.RequestAborted);
+
+                    preCheckSpan?.SetTag("http.request.body.size", bodyBytes.Length);
+                    preCheckSpan?.AddEvent(new ActivityEvent("RequestBodyBuffered"));
+                }
+                catch (InvalidOperationException)
+                {
+                    RecordViolation("StreamPayloadTooLarge");
+                    preCheckSpan?.SetStatus(ActivityStatusCode.Error, "StreamPayloadTooLarge");
+                    _logger.LogWarning(
+                        "Security violation [{SecurityEvent}]: Streamed payload exceeded max limit {MaxBytes} on {Path} from {RemoteIp}.",
+                        "StreamPayloadTooLarge", options.MaxPayloadBytes, requestPath, remoteIp);
+
+                    await RejectAsync(context, StatusCodes.Status413PayloadTooLarge, "Payload too large.");
+                    return;
+                }
+                finally
+                {
+                    if (context.Request.Body.CanSeek)
+                    {
+                        context.Request.Body.Position = 0;
+                    }
                 }
             }
 
@@ -149,36 +177,47 @@ namespace Finex.API.Middlewares
                 bool isUsingPreviousSecret;
                 string matchedSecret;
 
+                // 2. الشريط الأب لبوابة الأمان: وبداخله شريطان فرعيان للتمييز بين التشفير والكاش
                 using (var securitySpan = FinexDiagnostics.ActivitySource.StartActivity("Security.VerifyHmacAndReplay"))
                 {
-                    bool isSignatureValid = HmacSignatureUtility.TryVerifyDualKey(
-                        providedHexSignature: signatureRaw,
-                        expectedHashFactory: secret => HmacSignatureUtility.ComputeCanonicalHmacBytes(
-                            method: HttpMethods.Post,
-                            path: requestPath,
-                            timestamp: timestampRaw,
-                            idempotencyKey: normalizedIdempotencyKey,
-                            bodyBytes: bodyBytes,
-                            secret: secret),
-                        currentSecret: options.CurrentSecret,
-                        previousSecret: options.PreviousSecret,
-                        out string? validSecret);
+                    bool isSignatureValid;
+                    string? validSecret;
 
-                    if (!isSignatureValid || validSecret is null)
+                    // 2.أ شريط فرعي لحساب ومقارنة HMAC-SHA256
+                    using (var hmacSpan = FinexDiagnostics.ActivitySource.StartActivity("Security.VerifyHmacSignature"))
                     {
-                        securitySpan?.SetStatus(ActivityStatusCode.Error, "Invalid HMAC signature");
-                        FinexDiagnostics.SecurityViolationsCounter.Add(1, new KeyValuePair<string, object?>("reason", "InvalidSignature"));
+                        isSignatureValid = HmacSignatureUtility.TryVerifyDualKey(
+                            providedHexSignature: signatureRaw,
+                            expectedHashFactory: secret => HmacSignatureUtility.ComputeCanonicalHmacBytes(
+                                method: HttpMethods.Post,
+                                path: requestPath,
+                                timestamp: timestampRaw,
+                                idempotencyKey: normalizedIdempotencyKey,
+                                bodyBytes: bodyBytes,
+                                secret: secret),
+                            currentSecret: options.CurrentSecret,
+                            previousSecret: options.PreviousSecret,
+                            out validSecret);
 
-                        _logger.LogWarning(
-                            "Security violation [{SecurityEvent}]: Invalid HMAC signature for {IdempotencyKey} on {Path} from {RemoteIp}.",
-                            "InvalidSignature", normalizedIdempotencyKey, requestPath, remoteIp);
+                        if (!isSignatureValid || validSecret is null)
+                        {
+                            hmacSpan?.SetStatus(ActivityStatusCode.Error, "Invalid HMAC signature");
+                            securitySpan?.SetStatus(ActivityStatusCode.Error, "Invalid HMAC signature");
+                            RecordViolation("InvalidSignature");
 
-                        await RejectAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized.");
-                        return;
+                            _logger.LogWarning(
+                                "Security violation [{SecurityEvent}]: Invalid HMAC signature for {IdempotencyKey} on {Path} from {RemoteIp}.",
+                                "InvalidSignature", normalizedIdempotencyKey, requestPath, remoteIp);
+
+                            await RejectAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized.");
+                            return;
+                        }
+
+                        matchedSecret = validSecret;
+                        isUsingPreviousSecret = matchedSecret == options.PreviousSecret;
+                        hmacSpan?.SetTag("finex.key_generation", isUsingPreviousSecret ? "Previous" : "Current");
                     }
 
-                    matchedSecret = validSecret;
-                    isUsingPreviousSecret = matchedSecret == options.PreviousSecret;
                     securitySpan?.SetTag("finex.key_generation", isUsingPreviousSecret ? "Previous" : "Current");
 
                     if (isUsingPreviousSecret)
@@ -188,27 +227,38 @@ namespace Finex.API.Middlewares
                             "RotatedKeyUsed", normalizedIdempotencyKey, requestPath, remoteIp);
                     }
 
-                    bool isNonceClaimed = await _replayStore.TryConsumeNonceAsync(
-                        nonceKey: normalizedIdempotencyKey,
-                        ttl: TimeSpan.FromSeconds(options.AllowedClockSkewSeconds * 2),
-                        cancellationToken: context.RequestAborted);
-
-                    if (!isNonceClaimed)
+                    // 2.ب شريط فرعي لفحص FusionCache / Redis لمنع التكرار
+                    bool isNonceClaimed;
+                    using (var replaySpan = FinexDiagnostics.ActivitySource.StartActivity("Security.CheckReplayNonce"))
                     {
-                        securitySpan?.SetStatus(ActivityStatusCode.Error, "Replay blocked");
-                        FinexDiagnostics.SecurityViolationsCounter.Add(1, new KeyValuePair<string, object?>("reason", "ReplayBlocked"));
+                        replaySpan?.SetTag("cache.key_prefix", "hmac_nonce");
 
-                        _logger.LogWarning(
-                            "Security violation [{SecurityEvent}]: Replay or concurrent duplicate blocked for {IdempotencyKey} on {Path} from {RemoteIp}.",
-                            "ReplayBlocked", normalizedIdempotencyKey, requestPath, remoteIp);
+                        isNonceClaimed = await _replayStore.TryConsumeNonceAsync(
+                            nonceKey: normalizedIdempotencyKey,
+                            ttl: TimeSpan.FromSeconds(options.AllowedClockSkewSeconds * 2),
+                            cancellationToken: context.RequestAborted);
 
-                        await RejectAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized.");
-                        return;
+                        replaySpan?.SetTag("security.nonce_claimed", isNonceClaimed);
+
+                        if (!isNonceClaimed)
+                        {
+                            replaySpan?.SetStatus(ActivityStatusCode.Error, "Replay blocked");
+                            securitySpan?.SetStatus(ActivityStatusCode.Error, "Replay blocked");
+                            RecordViolation("ReplayBlocked");
+
+                            _logger.LogWarning(
+                                "Security violation [{SecurityEvent}]: Replay or concurrent duplicate blocked for {IdempotencyKey} on {Path} from {RemoteIp}.",
+                                "ReplayBlocked", normalizedIdempotencyKey, requestPath, remoteIp);
+
+                            await RejectAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized.");
+                            return;
+                        }
                     }
 
                     FinexDiagnostics.VerifiedRequestsCounter.Add(1, new KeyValuePair<string, object?>("key_generation", isUsingPreviousSecret ? "Previous" : "Current"));
                 }
 
+                // 3. تنفيذ الـ Controller وتوقيع الاستجابة
                 Stream originalBodyStream = context.Response.Body;
                 using var responseBuffer = new MemoryStream();
                 context.Response.Body = responseBuffer;
@@ -217,28 +267,34 @@ namespace Finex.API.Middlewares
                 {
                     await _next(context);
 
-                    responseBuffer.Position = 0;
-                    byte[] responseBytes = responseBuffer.ToArray();
-
-                    byte[] responseHmac = HmacSignatureUtility.ComputeResponseHmacBytes(
-                        timestamp: timestampRaw,
-                        idempotencyKey: normalizedIdempotencyKey,
-                        statusCode: context.Response.StatusCode,
-                        responseBodyBytes: responseBytes,
-                        secret: matchedSecret);
-
-                    context.Response.Headers[HeaderResponseSignature] = Convert.ToHexString(responseHmac).ToLowerInvariant();
-
-                    _logger.LogInformation(
-                        "HMAC request verified [{SecurityEvent}] for {IdempotencyKey} using {KeyGeneration} secret; signed response dispatched with {StatusCode}.",
-                        "RequestVerified",
-                        normalizedIdempotencyKey,
-                        isUsingPreviousSecret ? "Previous" : "Current",
-                        context.Response.StatusCode);
-
-                    if (responseBytes.Length > 0)
+                    // 4. الشريط الفرعي الأخير: حساب بصمة الرد وإرساله
+                    using (var signResponseSpan = FinexDiagnostics.ActivitySource.StartActivity("Security.SignAndFlushResponse"))
                     {
-                        await originalBodyStream.WriteAsync(responseBytes, context.RequestAborted);
+                        responseBuffer.Position = 0;
+                        byte[] responseBytes = responseBuffer.ToArray();
+                        signResponseSpan?.SetTag("http.response.body.size", responseBytes.Length);
+
+                        byte[] responseHmac = HmacSignatureUtility.ComputeResponseHmacBytes(
+                            timestamp: timestampRaw,
+                            idempotencyKey: normalizedIdempotencyKey,
+                            statusCode: context.Response.StatusCode,
+                            responseBodyBytes: responseBytes,
+                            secret: matchedSecret);
+
+                        context.Response.Headers[HeaderResponseSignature] = Convert.ToHexString(responseHmac).ToLowerInvariant();
+                        signResponseSpan?.AddEvent(new ActivityEvent("ResponseSignatureAttached"));
+
+                        _logger.LogInformation(
+                            "HMAC request verified [{SecurityEvent}] for {IdempotencyKey} using {KeyGeneration} secret; signed response dispatched with {StatusCode}.",
+                            "RequestVerified",
+                            normalizedIdempotencyKey,
+                            isUsingPreviousSecret ? "Previous" : "Current",
+                            context.Response.StatusCode);
+
+                        if (responseBytes.Length > 0)
+                        {
+                            await originalBodyStream.WriteAsync(responseBytes, context.RequestAborted);
+                        }
                     }
                 }
                 finally
@@ -290,6 +346,12 @@ namespace Finex.API.Middlewares
             return buffer.ToArray();
         }
 
+        private static void RecordViolation(string reason)
+        {
+            FinexDiagnostics.SecurityViolationsCounter.Add(
+                1,
+                new KeyValuePair<string, object?>("reason", reason));
+        }
         private static async Task RejectAsync(HttpContext context, int statusCode, string safePublicMessage)
         {
             context.Response.StatusCode = statusCode;

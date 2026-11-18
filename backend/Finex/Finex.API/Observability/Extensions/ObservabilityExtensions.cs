@@ -55,8 +55,6 @@ namespace Finex.API.Observability.Extensions
                         {
                             options.RecordException = true;
                         })
-                        // 🟢 طباعة الـ Traces على الشاشة مباشرة للاختبار السريع
-                        .AddConsoleExporter()
                         .AddOtlpExporter(otlp =>
                         {
                             otlp.Endpoint = new Uri($"{seqIngestUrl.TrimEnd('/')}/ingest/otlp/v1/traces");
@@ -76,17 +74,12 @@ namespace Finex.API.Observability.Extensions
                         .AddAspNetCoreInstrumentation()
                         .AddHttpClientInstrumentation()
                         .AddRuntimeInstrumentation()
-                        // 🟢 طباعة الـ Metrics على الشاشة مباشرة للاختبار السريع
-                        .AddConsoleExporter()
                         .AddOtlpExporter(otlp =>
                         {
-                            otlp.Endpoint = new Uri($"{seqIngestUrl.TrimEnd('/')}/ingest/otlp/v1/metrics");
-                            otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
-                            otlp.TimeoutMilliseconds = 1000;
-                            if (!string.IsNullOrWhiteSpace(seqApiKey))
-                            {
-                                otlp.Headers = $"X-Seq-ApiKey={seqApiKey}";
-                            }
+                            otlp.Endpoint = new Uri("http://localhost:4317");
+                            otlp.Protocol = OtlpExportProtocol.Grpc;
+                            otlp.TimeoutMilliseconds = 5000;
+                            otlp.Headers = $"X-Seq-ApiKey={seqApiKey}";
                         });
                 });
 

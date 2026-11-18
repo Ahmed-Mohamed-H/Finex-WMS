@@ -1,7 +1,9 @@
 ﻿using Finex.API.Middlewares;
+using Finex.API.Observability;
 using Finex.API.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Diagnostics;
 
 namespace Finex.API.Controllers
 {
@@ -19,6 +21,9 @@ namespace Finex.API.Controllers
         [RequireHmacSignature]
         public IActionResult EndShift([FromBody] object dto)
         {
+            using var Activity = FinexDiagnostics.ActivitySource.StartActivity("ShiftsController.EndShift", System.Diagnostics.ActivityKind.Internal);
+            Activity?.SetTag("shift", "end");
+            Activity?.AddEvent(new ActivityEvent("Processing shift end request"));
             _logger.LogInformation("Processing shift end request.");
             return Ok(new { message = "Shift ended successfully" });
         }
