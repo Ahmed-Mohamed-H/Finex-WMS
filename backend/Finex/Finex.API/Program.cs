@@ -2,6 +2,7 @@ using Finex.API.Infrastructure.Observability;
 using Finex.API.Middlewares;
 using Finex.API.Observability.Extensions;
 using Finex.API.Security;
+using Finex.API.Security.Extensions;
 using Finex.Application.Interfaces;
 using Finex.Infrastructure.Security;
 using Microsoft.Extensions.Options;
@@ -15,8 +16,7 @@ Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .Enrich.WithSpan()
     .WriteTo.Console()
-    .WriteTo.Seq("http://localhost:5341",
-        apiKey: "***REMOVED***")
+    .WriteTo.Seq("http://localhost:5341", apiKey: "***REMOVED***")
     .CreateBootstrapLogger();
 
 try
@@ -25,13 +25,15 @@ try
 
     var builder = WebApplication.CreateBuilder(args);
 
-    builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
+    builder.HardenFinexServerHost();
 
     builder.Host.UseSerilog((context, services, configuration) => configuration
         .ReadFrom.Configuration(context.Configuration)
         .ReadFrom.Services(services)
         .Enrich.FromLogContext()
         .Enrich.WithSpan());
+
+    builder.AddFinexOpenTelemetry();
 
     builder.Services.AddUnifiedProblemDetails();
     builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
@@ -55,29 +57,11 @@ try
         client.Timeout = TimeSpan.FromSeconds(3);
     });
 
-    builder.AddFinexOpenTelemetry();
-
     var app = builder.Build();
 
-
-    var securityPolicy = new HeaderPolicyCollection()
-        .AddDefaultApiSecurityHeaders()
-        .RemoveServerHeader();
-
-    if (app.Environment.IsDevelopment())
-    {
-        app.UseWhen(
-            context => !context.Request.Path.StartsWithSegments("/scalar") &&
-                       !context.Request.Path.StartsWithSegments("/openapi"),
-            branch => branch.UseSecurityHeaders(securityPolicy));
-    }
-    else
-    {
-        app.UseSecurityHeaders(securityPolicy);
-    }
-
+    app.UseFinexSecurityHeaders(allowCrossSiteFrontend: false);
     app.UseExceptionHandler();
-
+    app.UseHttpsRedirection();
     app.UseStatusCodePages();
 
     app.UseSerilogRequestLogging(options =>
@@ -100,7 +84,6 @@ try
     }
 
     app.UseRouting();
-    app.UseHttpsRedirection();
     app.UseAuthorization();
 
     app.UseWhen(
@@ -109,7 +92,7 @@ try
 
     app.MapControllers();
 
-    app.Run();
+    await app.RunAsync();
 }
 catch (Exception ex)
 {
