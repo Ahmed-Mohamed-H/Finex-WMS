@@ -16,7 +16,6 @@ Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .Enrich.WithSpan()
     .WriteTo.Console()
-    .WriteTo.Seq("http://localhost:5341", apiKey: "***REMOVED***")
     .CreateBootstrapLogger();
 
 try
@@ -27,11 +26,18 @@ try
 
     builder.HardenFinexServerHost();
 
-    builder.Host.UseSerilog((context, services, configuration) => configuration
-        .ReadFrom.Configuration(context.Configuration)
-        .ReadFrom.Services(services)
-        .Enrich.FromLogContext()
-        .Enrich.WithSpan());
+    builder.Host.UseSerilog((context, services, configuration) =>
+    {
+        var seqUrl = context.Configuration["Seq:ServerUrl"] ?? "http://localhost:5341";
+        var seqApiKey = context.Configuration["Seq:ApiKey"];
+
+        configuration
+            .ReadFrom.Configuration(context.Configuration)
+            .ReadFrom.Services(services)
+            .Enrich.FromLogContext()
+            .Enrich.WithSpan()
+            .WriteTo.Seq(seqUrl, apiKey: seqApiKey);
+    });
 
     builder.AddFinexOpenTelemetry();
 

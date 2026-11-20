@@ -9,8 +9,8 @@ namespace Finex.API.Observability.Extensions
     {
         public static WebApplicationBuilder AddFinexOpenTelemetry(this WebApplicationBuilder builder)
         {
-            var seqIngestUrl = builder.Configuration["Serilog:WriteTo:1:Args:serverUrl"] ?? "http://localhost:5341";
-            var seqApiKey = builder.Configuration["Serilog:WriteTo:1:Args:apiKey"];
+            var seqIngestUrl = builder.Configuration["Seq:ServerUrl"] ?? "http://localhost:5341";
+            var seqApiKey = builder.Configuration["Seq:ApiKey"];
 
             builder.Services.AddOpenTelemetry()
                 .ConfigureResource(resource => resource
@@ -27,7 +27,6 @@ namespace Finex.API.Observability.Extensions
                 {
                     tracing
                         .AddSource(FinexDiagnostics.ServiceName)
-                        // ربط تتبع العمليات الخلفية (ResilientBackgroundService) بـ OpenTelemetry و Seq
                         .AddSource(FinexDiagnostics.BackgroundWorkersSourceName)
                         .AddAspNetCoreInstrumentation(options =>
                         {
