@@ -23,8 +23,6 @@ namespace Finex.Infrastructure.Security
             string cacheKey = $"hmac_nonce:{nonceKey}";
             bool isFirstRequest = false;
 
-            // FusionCache Stampede Protection يضمن تنفيذ الـ Factory لطلب واحد فقط
-            // حتى لو وصل طلبان متطابقان في نفس المايكروثانية
             await _fusionCache.GetOrSetAsync<byte>(
                 key: cacheKey,
                 factory: _ =>

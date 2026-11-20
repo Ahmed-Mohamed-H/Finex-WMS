@@ -27,6 +27,8 @@ namespace Finex.API.Observability.Extensions
                 {
                     tracing
                         .AddSource(FinexDiagnostics.ServiceName)
+                        // ربط تتبع العمليات الخلفية (ResilientBackgroundService) بـ OpenTelemetry و Seq
+                        .AddSource(FinexDiagnostics.BackgroundWorkersSourceName)
                         .AddAspNetCoreInstrumentation(options =>
                         {
                             options.RecordException = true;
@@ -38,19 +40,19 @@ namespace Finex.API.Observability.Extensions
                                        !path.StartsWith("/health", StringComparison.OrdinalIgnoreCase);
                             };
                         })
-                       .AddHttpClientInstrumentation(options =>
-                       {
-                           options.RecordException = true;
+                        .AddHttpClientInstrumentation(options =>
+                        {
+                            options.RecordException = true;
 
-                           options.EnrichWithHttpRequestMessage = (activity, httpRequestMessage) =>
-                           {
-                               if (httpRequestMessage.RequestUri != null)
-                               {
-                                   activity.SetTag("http.request.uri", httpRequestMessage.RequestUri.ToString());
-                                   activity.SetTag("http.target.host", httpRequestMessage.RequestUri.Host);
-                               }
-                           };
-                       })
+                            options.EnrichWithHttpRequestMessage = (activity, httpRequestMessage) =>
+                            {
+                                if (httpRequestMessage.RequestUri != null)
+                                {
+                                    activity.SetTag("http.request.uri", httpRequestMessage.RequestUri.ToString());
+                                    activity.SetTag("http.target.host", httpRequestMessage.RequestUri.Host);
+                                }
+                            };
+                        })
                         .AddSqlClientInstrumentation(options =>
                         {
                             options.RecordException = true;
@@ -79,7 +81,10 @@ namespace Finex.API.Observability.Extensions
                             otlp.Endpoint = new Uri("http://localhost:4317");
                             otlp.Protocol = OtlpExportProtocol.Grpc;
                             otlp.TimeoutMilliseconds = 5000;
-                            otlp.Headers = $"X-Seq-ApiKey={seqApiKey}";
+                            if (!string.IsNullOrWhiteSpace(seqApiKey))
+                            {
+                                otlp.Headers = $"X-Seq-ApiKey={seqApiKey}";
+                            }
                         });
                 });
 

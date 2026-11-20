@@ -1,3 +1,4 @@
+using Finex.API.Infrastructure.Observability;
 using Finex.API.Middlewares;
 using Finex.API.Observability.Extensions;
 using Finex.API.Security;
@@ -14,9 +15,8 @@ Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .Enrich.WithSpan()
     .WriteTo.Console()
-    .WriteTo.Seq("http://localhost:5341", 
-    apiKey: "***REMOVED***"
-    )
+    .WriteTo.Seq("http://localhost:5341",
+        apiKey: "***REMOVED***")
     .CreateBootstrapLogger();
 
 try
@@ -25,10 +25,16 @@ try
 
     var builder = WebApplication.CreateBuilder(args);
 
+    builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
+
     builder.Host.UseSerilog((context, services, configuration) => configuration
         .ReadFrom.Configuration(context.Configuration)
         .ReadFrom.Services(services)
-        .Enrich.FromLogContext());
+        .Enrich.FromLogContext()
+        .Enrich.WithSpan());
+
+    builder.Services.AddUnifiedProblemDetails();
+    builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
     builder.Services
         .AddOptions<ApiSecurityOptions>()
@@ -50,7 +56,29 @@ try
     });
 
     builder.AddFinexOpenTelemetry();
+
     var app = builder.Build();
+
+
+    var securityPolicy = new HeaderPolicyCollection()
+        .AddDefaultApiSecurityHeaders()
+        .RemoveServerHeader();
+
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseWhen(
+            context => !context.Request.Path.StartsWithSegments("/scalar") &&
+                       !context.Request.Path.StartsWithSegments("/openapi"),
+            branch => branch.UseSecurityHeaders(securityPolicy));
+    }
+    else
+    {
+        app.UseSecurityHeaders(securityPolicy);
+    }
+
+    app.UseExceptionHandler();
+
+    app.UseStatusCodePages();
 
     app.UseSerilogRequestLogging(options =>
     {
@@ -89,5 +117,5 @@ catch (Exception ex)
 }
 finally
 {
-    Log.CloseAndFlush();
+    await Log.CloseAndFlushAsync();
 }

@@ -9,10 +9,6 @@ namespace Finex.Infrastructure.Security
     {
         private const int Sha256HashLengthBytes = 32;
 
-        /// <summary>
-        /// يحسب بصمة HMAC-SHA256 للنص الموحد:
-        /// Method\nPath\nTimestamp\nIdempotencyKey\nBody
-        /// </summary>
         public static byte[] ComputeCanonicalHmacBytes(
             string method,
             string path,
@@ -41,10 +37,6 @@ namespace Finex.Infrastructure.Security
             }
         }
 
-        /// <summary>
-        /// يحسب بصمة HMAC-SHA256 لرد السيرفر مربوطة بالطلب الأصلي وحالة الاستجابة:
-        /// Timestamp\nIdempotencyKey\nStatusCode\nResponseBody
-        /// </summary>
         public static byte[] ComputeResponseHmacBytes(
             string timestamp,
             string idempotencyKey,
@@ -72,9 +64,6 @@ namespace Finex.Infrastructure.Security
             }
         }
 
-        /// <summary>
-        /// يتحقق من التوقيع باستخدام CurrentSecret ثم PreviousSecret بمقارنة ثابتة الزمن (FixedTimeEquals).
-        /// </summary>
         public static bool TryVerifyDualKey(
             string providedHexSignature,
             Func<string, byte[]> expectedHashFactory,

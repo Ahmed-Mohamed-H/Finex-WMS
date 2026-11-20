@@ -1,10 +1,11 @@
 ﻿using Finex.API.Observability;
 using Finex.Application.Interfaces;
 using Finex.Infrastructure.Security;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Serilog.Context;
+using System.Buffers;
 using System.Diagnostics;
-using System.Text;
 
 namespace Finex.API.Middlewares
 {
@@ -21,17 +22,20 @@ namespace Finex.API.Middlewares
         private readonly RequestDelegate _next;
         private readonly IOptionsMonitor<ApiSecurityOptions> _optionsMonitor;
         private readonly IReplayProtectionStore _replayStore;
+        private readonly IProblemDetailsService _problemDetailsService;
         private readonly ILogger<ApiSecurityMiddleware> _logger;
 
         public ApiSecurityMiddleware(
             RequestDelegate next,
             IOptionsMonitor<ApiSecurityOptions> optionsMonitor,
             IReplayProtectionStore replayStore,
+            IProblemDetailsService problemDetailsService,
             ILogger<ApiSecurityMiddleware> logger)
         {
             _next = next ?? throw new ArgumentNullException(nameof(next));
             _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
             _replayStore = replayStore ?? throw new ArgumentNullException(nameof(replayStore));
+            _problemDetailsService = problemDetailsService ?? throw new ArgumentNullException(nameof(problemDetailsService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -46,7 +50,6 @@ namespace Finex.API.Middlewares
             string timestampRaw;
             string signatureRaw;
 
-            // 1. الشريط الفرعي الأول: الفحوصات الأولية وقراءة الـ Body Stream
             using (var preCheckSpan = FinexDiagnostics.ActivitySource.StartActivity("Security.PreCheckAndReadBody"))
             {
                 if (!HttpMethods.IsPost(context.Request.Method))
@@ -138,9 +141,14 @@ namespace Finex.API.Middlewares
 
                 try
                 {
+                    int initialCapacity = context.Request.ContentLength is > 0 and <= int.MaxValue
+                        ? (int)context.Request.ContentLength.Value
+                        : 4096;
+
                     bodyBytes = await ReadBoundedStreamAsync(
                         context.Request.Body,
                         options.MaxPayloadBytes,
+                        initialCapacity,
                         context.RequestAborted);
 
                     preCheckSpan?.SetTag("http.request.body.size", bodyBytes.Length);
@@ -177,13 +185,11 @@ namespace Finex.API.Middlewares
                 bool isUsingPreviousSecret;
                 string matchedSecret;
 
-                // 2. الشريط الأب لبوابة الأمان: وبداخله شريطان فرعيان للتمييز بين التشفير والكاش
                 using (var securitySpan = FinexDiagnostics.ActivitySource.StartActivity("Security.VerifyHmacAndReplay"))
                 {
                     bool isSignatureValid;
                     string? validSecret;
 
-                    // 2.أ شريط فرعي لحساب ومقارنة HMAC-SHA256
                     using (var hmacSpan = FinexDiagnostics.ActivitySource.StartActivity("Security.VerifyHmacSignature"))
                     {
                         isSignatureValid = HmacSignatureUtility.TryVerifyDualKey(
@@ -227,7 +233,6 @@ namespace Finex.API.Middlewares
                             "RotatedKeyUsed", normalizedIdempotencyKey, requestPath, remoteIp);
                     }
 
-                    // 2.ب شريط فرعي لفحص FusionCache / Redis لمنع التكرار
                     bool isNonceClaimed;
                     using (var replaySpan = FinexDiagnostics.ActivitySource.StartActivity("Security.CheckReplayNonce"))
                     {
@@ -258,7 +263,6 @@ namespace Finex.API.Middlewares
                     FinexDiagnostics.VerifiedRequestsCounter.Add(1, new KeyValuePair<string, object?>("key_generation", isUsingPreviousSecret ? "Previous" : "Current"));
                 }
 
-                // 3. تنفيذ الـ Controller وتوقيع الاستجابة
                 Stream originalBodyStream = context.Response.Body;
                 using var responseBuffer = new MemoryStream();
                 context.Response.Body = responseBuffer;
@@ -267,33 +271,25 @@ namespace Finex.API.Middlewares
                 {
                     await _next(context);
 
-                    // 4. الشريط الفرعي الأخير: حساب بصمة الرد وإرساله
                     using (var signResponseSpan = FinexDiagnostics.ActivitySource.StartActivity("Security.SignAndFlushResponse"))
                     {
                         responseBuffer.Position = 0;
-                        byte[] responseBytes = responseBuffer.ToArray();
-                        signResponseSpan?.SetTag("http.response.body.size", responseBytes.Length);
+                        responseBuffer.TryGetBuffer(out ArraySegment<byte> responseSegment);
+                        signResponseSpan?.SetTag("http.response.body.size", responseSegment.Count);
 
                         byte[] responseHmac = HmacSignatureUtility.ComputeResponseHmacBytes(
                             timestamp: timestampRaw,
                             idempotencyKey: normalizedIdempotencyKey,
                             statusCode: context.Response.StatusCode,
-                            responseBodyBytes: responseBytes,
+                            responseBodyBytes: responseSegment.AsSpan(),
                             secret: matchedSecret);
 
-                        context.Response.Headers[HeaderResponseSignature] = Convert.ToHexString(responseHmac).ToLowerInvariant();
+                        context.Response.Headers[HeaderResponseSignature] = Convert.ToHexStringLower(responseHmac);
                         signResponseSpan?.AddEvent(new ActivityEvent("ResponseSignatureAttached"));
 
-                        _logger.LogInformation(
-                            "HMAC request verified [{SecurityEvent}] for {IdempotencyKey} using {KeyGeneration} secret; signed response dispatched with {StatusCode}.",
-                            "RequestVerified",
-                            normalizedIdempotencyKey,
-                            isUsingPreviousSecret ? "Previous" : "Current",
-                            context.Response.StatusCode);
-
-                        if (responseBytes.Length > 0)
+                        if (responseSegment.Count > 0)
                         {
-                            await originalBodyStream.WriteAsync(responseBytes, context.RequestAborted);
+                            await originalBodyStream.WriteAsync(responseSegment.AsMemory(), context.RequestAborted);
                         }
                     }
                 }
@@ -325,25 +321,33 @@ namespace Finex.API.Middlewares
         private static async Task<byte[]> ReadBoundedStreamAsync(
             Stream stream,
             int maxBytes,
+            int initialCapacity,
             CancellationToken cancellationToken)
         {
-            using var buffer = new MemoryStream();
-            byte[] chunk = new byte[16 * 1024];
-            int totalRead = 0;
-            int bytesRead;
-
-            while ((bytesRead = await stream.ReadAsync(chunk, cancellationToken)) > 0)
+            using var buffer = new MemoryStream(Math.Min(initialCapacity, maxBytes));
+            byte[] chunk = ArrayPool<byte>.Shared.Rent(16 * 1024);
+            try
             {
-                totalRead += bytesRead;
-                if (totalRead > maxBytes)
+                int totalRead = 0;
+                int bytesRead;
+
+                while ((bytesRead = await stream.ReadAsync(chunk, cancellationToken)) > 0)
                 {
-                    throw new InvalidOperationException("Request body exceeded maximum allowed byte limit.");
+                    totalRead += bytesRead;
+                    if (totalRead > maxBytes)
+                    {
+                        throw new InvalidOperationException("Request body exceeded maximum allowed byte limit.");
+                    }
+
+                    buffer.Write(chunk, 0, bytesRead);
                 }
 
-                buffer.Write(chunk, 0, bytesRead);
+                return buffer.ToArray();
             }
-
-            return buffer.ToArray();
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(chunk);
+            }
         }
 
         private static void RecordViolation(string reason)
@@ -352,19 +356,20 @@ namespace Finex.API.Middlewares
                 1,
                 new KeyValuePair<string, object?>("reason", reason));
         }
-        private static async Task RejectAsync(HttpContext context, int statusCode, string safePublicMessage)
+
+        private async Task RejectAsync(HttpContext context, int statusCode, string safePublicMessage)
         {
             context.Response.StatusCode = statusCode;
-            context.Response.ContentType = "application/problem+json";
 
-            var payload = $$"""
+            await _problemDetailsService.TryWriteAsync(new ProblemDetailsContext
             {
-              "status": {{statusCode}},
-              "title": "{{safePublicMessage}}"
-            }
-            """;
-
-            await context.Response.WriteAsync(payload, context.RequestAborted);
+                HttpContext = context,
+                ProblemDetails = new ProblemDetails
+                {
+                    Status = statusCode,
+                    Title = safePublicMessage
+                }
+            });
         }
     }
 }

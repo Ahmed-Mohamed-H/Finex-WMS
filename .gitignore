@@ -483,3 +483,6 @@ $RECYCLE.BIN/
 
 node_modules/
 .env
+# Seq local data volume (if bind-mounted locally instead of a named volume)
+seq_data/
+seq-data/
