@@ -1,17 +1,36 @@
 services:
   seq:
-    image: datalust/seq:latest
+    image: datalust/seq:2024.3
     container_name: finex-seq
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
     environment:
       - "ACCEPT_EULA=Y"
-      - "SEQ_FIRSTRUN_ADMINUSERNAME=admin"
-      - "SEQ_FIRSTRUN_ADMINPASSWORD=ChangeMe_StrongPass123!"
-      - "SEQ_API_CANONICALURI=http://localhost:5341"
+      - "SEQ_FIRSTRUN_ADMINUSERNAME=${SEQ_ADMIN_USER:?Set SEQ_ADMIN_USER}"
+      - "SEQ_FIRSTRUN_ADMINPASSWORD=${SEQ_ADMIN_PASSWORD:?Set SEQ_ADMIN_PASSWORD}"
+      - "SEQ_API_CANONICALURI=${SEQ_API_CANONICALURI:-http://127.0.0.1:5341}"
     ports:
-      - "5341:80"
+      - "${SEQ_HOST_BIND_IP:-127.0.0.1}:${SEQ_HOST_PORT:-5341}:80"
     volumes:
-      - seq_data:/data
+      - type: volume
+        source: seq_data
+        target: /data
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   seq_data:
+    name: finex-seq-data

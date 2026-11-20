@@ -70,18 +70,7 @@ try
     app.UseHttpsRedirection();
     app.UseStatusCodePages();
 
-    app.UseSerilogRequestLogging(options =>
-    {
-        options.MessageTemplate = "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
-        options.EnrichDiagnosticContext = (diagnosticContext, httpContext) =>
-        {
-            diagnosticContext.Set("RemoteIp", httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
-            if (httpContext.Request.Headers.TryGetValue("X-Idempotency-Key", out var key))
-            {
-                diagnosticContext.Set("IdempotencyKey", key.ToString());
-            }
-        };
-    });
+    app.UseFinexRequestLogging();
 
     if (app.Environment.IsDevelopment())
     {

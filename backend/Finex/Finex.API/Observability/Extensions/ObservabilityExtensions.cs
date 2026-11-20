@@ -68,25 +68,29 @@ namespace Finex.API.Observability.Extensions
                         });
                 })
 
-                .WithMetrics(metrics =>
-                {
-                    metrics
-                        .AddMeter(FinexDiagnostics.ServiceName)
-                        .AddAspNetCoreInstrumentation()
-                        .AddHttpClientInstrumentation()
-                        .AddRuntimeInstrumentation()
-                        .AddOtlpExporter(otlp =>
-                        {
-                            otlp.Endpoint = new Uri("http://localhost:4317");
-                            otlp.Protocol = OtlpExportProtocol.Grpc;
-                            otlp.TimeoutMilliseconds = 5000;
-                            if (!string.IsNullOrWhiteSpace(seqApiKey))
-                            {
-                                otlp.Headers = $"X-Seq-ApiKey={seqApiKey}";
-                            }
-                        });
-                });
+             .WithMetrics(metrics =>
+             {
+                 metrics
+                     .AddMeter(FinexDiagnostics.ServiceName)
+                     .AddAspNetCoreInstrumentation()
+                     .AddHttpClientInstrumentation()
+                     .AddRuntimeInstrumentation();
 
+                 var metricsEndpoint = builder.Configuration["OpenTelemetry:MetricsEndpoint"];
+                 if (!string.IsNullOrWhiteSpace(metricsEndpoint))
+                 {
+                     metrics.AddOtlpExporter(otlp =>
+                     {
+                         otlp.Endpoint = new Uri(metricsEndpoint);
+                         otlp.Protocol = OtlpExportProtocol.Grpc;
+                         otlp.TimeoutMilliseconds = 5000;
+                         if (!string.IsNullOrWhiteSpace(seqApiKey))
+                         {
+                             otlp.Headers = $"X-Seq-ApiKey={seqApiKey}";
+                         }
+                     });
+                 }
+             });
             return builder;
         }
     }

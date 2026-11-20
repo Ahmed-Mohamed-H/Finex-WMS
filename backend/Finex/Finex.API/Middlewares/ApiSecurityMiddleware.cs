@@ -44,6 +44,7 @@ namespace Finex.API.Middlewares
             var options = _optionsMonitor.CurrentValue;
             var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
             var requestPath = context.Request.Path.Value ?? "/";
+            var requestTarget = $"{requestPath}{context.Request.QueryString.Value}";
 
             byte[] bodyBytes;
             Guid idempotencyGuid;
@@ -196,7 +197,7 @@ namespace Finex.API.Middlewares
                             providedHexSignature: signatureRaw,
                             expectedHashFactory: secret => HmacSignatureUtility.ComputeCanonicalHmacBytes(
                                 method: HttpMethods.Post,
-                                path: requestPath,
+                                pathAndQuery: requestTarget,
                                 timestamp: timestampRaw,
                                 idempotencyKey: normalizedIdempotencyKey,
                                 bodyBytes: bodyBytes,
@@ -264,7 +265,7 @@ namespace Finex.API.Middlewares
                 }
 
                 Stream originalBodyStream = context.Response.Body;
-                using var responseBuffer = new MemoryStream();
+                using var responseBuffer = new BoundedMemoryStream(options.MaxResponseBytes);
                 context.Response.Body = responseBuffer;
 
                 try
@@ -292,6 +293,19 @@ namespace Finex.API.Middlewares
                             await originalBodyStream.WriteAsync(responseSegment.AsMemory(), context.RequestAborted);
                         }
                     }
+                }
+                catch (ResponseSizeLimitExceededException)
+                {
+                    context.Response.Body = originalBodyStream;
+                    context.Response.Headers.Remove("Content-Type");
+                    context.Response.Headers.Remove("Content-Length");
+
+                    _logger.LogError(
+                        "Signed response on {Path} exceeded MaxResponseBytes ({MaxBytes}).",
+                        requestPath,
+                        options.MaxResponseBytes);
+
+                    await RejectAsync(context, StatusCodes.Status500InternalServerError, "Response size limit exceeded.");
                 }
                 finally
                 {
@@ -357,6 +371,7 @@ namespace Finex.API.Middlewares
                 1,
                 new KeyValuePair<string, object?>("reason", reason));
         }
+
         private async Task RejectAsync(HttpContext context, int statusCode, string safePublicMessage)
         {
             context.Response.StatusCode = statusCode;
@@ -370,6 +385,51 @@ namespace Finex.API.Middlewares
                     Title = safePublicMessage
                 }
             });
+        }
+
+        private sealed class ResponseSizeLimitExceededException : Exception;
+
+        private sealed class BoundedMemoryStream(int maxBytes) : MemoryStream
+        {
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                if (Length + count > maxBytes)
+                {
+                    throw new ResponseSizeLimitExceededException();
+                }
+
+                base.Write(buffer, offset, count);
+            }
+
+            public override void Write(ReadOnlySpan<byte> buffer)
+            {
+                if (Length + buffer.Length > maxBytes)
+                {
+                    throw new ResponseSizeLimitExceededException();
+                }
+
+                base.Write(buffer);
+            }
+
+            public override void WriteByte(byte value)
+            {
+                if (Length + 1 > maxBytes)
+                {
+                    throw new ResponseSizeLimitExceededException();
+                }
+
+                base.WriteByte(value);
+            }
+
+            public override void SetLength(long value)
+            {
+                if (value > maxBytes)
+                {
+                    throw new ResponseSizeLimitExceededException();
+                }
+
+                base.SetLength(value);
+            }
         }
     }
 }

@@ -1,5 +1,4 @@
-﻿using System;
-using System.Buffers;
+﻿using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -11,30 +10,14 @@ namespace Finex.Infrastructure.Security
 
         public static byte[] ComputeCanonicalHmacBytes(
             string method,
-            string path,
+            string pathAndQuery,
             string timestamp,
             string idempotencyKey,
             ReadOnlySpan<byte> bodyBytes,
             string secret)
         {
-            string prefix = $"{method}\n{path}\n{timestamp}\n{idempotencyKey}\n";
-            int prefixByteCount = Encoding.UTF8.GetByteCount(prefix);
-            int totalLength = prefixByteCount + bodyBytes.Length;
-
-            byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(totalLength);
-            try
-            {
-                int written = Encoding.UTF8.GetBytes(prefix, rentedBuffer.AsSpan(0, prefixByteCount));
-                bodyBytes.CopyTo(rentedBuffer.AsSpan(written, bodyBytes.Length));
-
-                byte[] keyBytes = Encoding.UTF8.GetBytes(secret);
-                return HMACSHA256.HashData(keyBytes, rentedBuffer.AsSpan(0, totalLength));
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(rentedBuffer.AsSpan(0, totalLength));
-                ArrayPool<byte>.Shared.Return(rentedBuffer);
-            }
+            string prefix = $"{method}\n{pathAndQuery}\n{timestamp}\n{idempotencyKey}\n";
+            return ComputeHmacCore(prefix, bodyBytes, secret);
         }
 
         public static byte[] ComputeResponseHmacBytes(
@@ -45,22 +28,34 @@ namespace Finex.Infrastructure.Security
             string secret)
         {
             string prefix = $"{timestamp}\n{idempotencyKey}\n{statusCode}\n";
-            int prefixByteCount = Encoding.UTF8.GetByteCount(prefix);
-            int totalLength = prefixByteCount + responseBodyBytes.Length;
+            return ComputeHmacCore(prefix, responseBodyBytes, secret);
+        }
 
-            byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(totalLength);
+        private static byte[] ComputeHmacCore(string prefix, ReadOnlySpan<byte> payloadBytes, string secret)
+        {
+            int prefixByteCount = Encoding.UTF8.GetByteCount(prefix);
+            int totalLength = prefixByteCount + payloadBytes.Length;
+            int maxKeyBytes = Encoding.UTF8.GetMaxByteCount(secret.Length);
+
+            byte[] rentedDataBuffer = ArrayPool<byte>.Shared.Rent(totalLength);
+            byte[] rentedKeyBuffer = ArrayPool<byte>.Shared.Rent(maxKeyBytes);
             try
             {
-                int written = Encoding.UTF8.GetBytes(prefix, rentedBuffer.AsSpan(0, prefixByteCount));
-                responseBodyBytes.CopyTo(rentedBuffer.AsSpan(written, responseBodyBytes.Length));
+                int written = Encoding.UTF8.GetBytes(prefix, rentedDataBuffer.AsSpan(0, prefixByteCount));
+                payloadBytes.CopyTo(rentedDataBuffer.AsSpan(written, payloadBytes.Length));
 
-                byte[] keyBytes = Encoding.UTF8.GetBytes(secret);
-                return HMACSHA256.HashData(keyBytes, rentedBuffer.AsSpan(0, totalLength));
+                int keyWritten = Encoding.UTF8.GetBytes(secret, rentedKeyBuffer);
+
+                return HMACSHA256.HashData(
+                    rentedKeyBuffer.AsSpan(0, keyWritten),
+                    rentedDataBuffer.AsSpan(0, totalLength));
             }
             finally
             {
-                CryptographicOperations.ZeroMemory(rentedBuffer.AsSpan(0, totalLength));
-                ArrayPool<byte>.Shared.Return(rentedBuffer);
+                CryptographicOperations.ZeroMemory(rentedDataBuffer.AsSpan(0, totalLength));
+                CryptographicOperations.ZeroMemory(rentedKeyBuffer.AsSpan(0, maxKeyBytes));
+                ArrayPool<byte>.Shared.Return(rentedDataBuffer);
+                ArrayPool<byte>.Shared.Return(rentedKeyBuffer);
             }
         }
 
@@ -112,19 +107,13 @@ namespace Finex.Infrastructure.Security
 
         private static bool TryDecodeHex(ReadOnlySpan<char> hex, Span<byte> destination)
         {
-            if (hex.Length != destination.Length * 2)
-            {
-                return false;
-            }
+            if (hex.Length != destination.Length * 2) return false;
 
             for (int i = 0; i < destination.Length; i++)
             {
                 int high = ParseHexNibble(hex[i * 2]);
                 int low = ParseHexNibble(hex[i * 2 + 1]);
-                if (high < 0 || low < 0)
-                {
-                    return false;
-                }
+                if (high < 0 || low < 0) return false;
 
                 destination[i] = (byte)((high << 4) | low);
             }
