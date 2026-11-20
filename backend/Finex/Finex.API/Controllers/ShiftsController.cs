@@ -1,44 +1,50 @@
-﻿using Finex.API.Middlewares;
+﻿using Finex.API.Contracts.Common;
 using Finex.API.Observability;
 using Finex.API.Security;
-using Microsoft.AspNetCore.Http;
+using Finex.Application.Common.Results;
 using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
 
-namespace Finex.API.Controllers
+namespace Finex.API.Controllers;
+
+[Route("api/shifts")]
+public sealed class ShiftsController(ILogger<ShiftsController> logger) : ApiControllerBase
 {
-    [ApiController]
-    [Route("api/shifts")]
+    public sealed record ShiftSummaryDto(Guid ShiftId, DateTime EndedAtUtc, decimal TotalAmount);
 
-    public sealed class ShiftsController : ControllerBase
+    [HttpPost("end")]
+    [RequireHmacSignature]
+    [ProducesResponseType(typeof(ApiResponse<ShiftSummaryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public ActionResult<ApiResponse<ShiftSummaryDto>> EndShift([FromBody] object dto)
     {
-        private readonly ILogger<ShiftsController> _logger;
-        public ShiftsController(ILogger<ShiftsController> logger)
-        {
-            _logger = logger;
-        }
-        [HttpPost("end")]
-        [RequireHmacSignature]
-        public IActionResult EndShift([FromBody] object dto)
-        {
-            using var Activity = FinexDiagnostics.ActivitySource.StartActivity("ShiftsController.EndShift", System.Diagnostics.ActivityKind.Internal);
-            Activity?.SetTag("shift", "end");
-            Activity?.AddEvent(new ActivityEvent("Processing shift end request"));
-            _logger.LogInformation("Processing shift end request.");
-            return Ok(new { message = "Shift ended successfully" });
-        }
+        using var activity = FinexDiagnostics.ActivitySource.StartActivity("ShiftsController.EndShift", ActivityKind.Internal);
+        activity?.SetTag("shift", "end");
+        activity?.AddEvent(new ActivityEvent("Processing shift end request"));
+        logger.LogInformation("Processing shift end request.");
 
-        [HttpPost("record")]
-        [RequireHmacSignature]
-        public IActionResult RecordShift([FromBody] object dto)
-        {
-            return Ok(new { message = "Shift recorded successfully" });
-        }
+        var summary = new ShiftSummaryDto(Guid.NewGuid(), DateTime.UtcNow, 15400.00m);
+        Result<ShiftSummaryDto> result = Result.Success(summary);
 
-        [HttpGet("report")]
-        public IActionResult GetShiftReport()
-        {
-            return Ok();
-        }
+        return FromResult(result, "Shift ended successfully.");
+    }
+
+    [HttpPost("record")]
+    [RequireHmacSignature]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    public ActionResult<ApiResponse> RecordShift([FromBody] object dto)
+    {
+        Result result = Result.Success();
+        return FromResult(result, "Shift recorded successfully.");
+    }
+
+    [HttpGet("report")]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<ShiftSummaryDto>>), StatusCodes.Status200OK)]
+    public ActionResult<ApiResponse<IReadOnlyList<ShiftSummaryDto>>> GetShiftReport()
+    {
+        IReadOnlyList<ShiftSummaryDto> reports = [];
+        return OkResponse(reports, "Shift report retrieved successfully.");
     }
 }

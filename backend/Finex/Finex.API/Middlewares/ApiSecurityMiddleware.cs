@@ -352,11 +352,11 @@ namespace Finex.API.Middlewares
 
         private static void RecordViolation(string reason)
         {
+            Activity.Current?.SetTag("security.violation", reason);
             FinexDiagnostics.SecurityViolationsCounter.Add(
                 1,
                 new KeyValuePair<string, object?>("reason", reason));
         }
-
         private async Task RejectAsync(HttpContext context, int statusCode, string safePublicMessage)
         {
             context.Response.StatusCode = statusCode;
