@@ -1,8 +1,10 @@
+using Finex.API.Filters;
 using Finex.API.Infrastructure.Observability;
 using Finex.API.Middlewares;
 using Finex.API.Observability.Extensions;
 using Finex.API.Security;
 using Finex.API.Security.Extensions;
+using Finex.Application;
 using Finex.Application.Interfaces;
 using Finex.Infrastructure;
 using Finex.Infrastructure.Security;
@@ -56,7 +58,10 @@ try
     builder.Services.AddFusionCache();
     builder.Services.AddSingleton<IReplayProtectionStore, FusionCacheReplayProtectionStore>();
 
-    builder.Services.AddControllers();
+    builder.Services.AddControllers(options =>
+    {
+        options.Filters.Add<FluentValidationActionFilter>();
+    });
     builder.Services.AddOpenApi();
 
     builder.Services.AddHttpClient(Options.DefaultName, client =>
@@ -65,7 +70,7 @@ try
     });
 
     builder.Services.AddFinexInfrastructure(builder.Configuration);
-
+    builder.Services.AddFinexApplication();
     var app = builder.Build();
 
     app.UseFinexSecurityHeaders(allowCrossSiteFrontend: false);
