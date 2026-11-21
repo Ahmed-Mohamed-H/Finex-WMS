@@ -4,6 +4,7 @@ using Finex.API.Observability.Extensions;
 using Finex.API.Security;
 using Finex.API.Security.Extensions;
 using Finex.Application.Interfaces;
+using Finex.Infrastructure;
 using Finex.Infrastructure.Security;
 using Microsoft.Extensions.Options;
 using Scalar.AspNetCore;
@@ -63,6 +64,8 @@ try
         client.Timeout = TimeSpan.FromSeconds(3);
     });
 
+    builder.Services.AddFinexInfrastructure(builder.Configuration);
+
     var app = builder.Build();
 
     app.UseFinexSecurityHeaders(allowCrossSiteFrontend: false);
@@ -89,7 +92,7 @@ try
 
     await app.RunAsync();
 }
-catch (Exception ex)
+catch (Exception ex) when (ex is not HostAbortedException)
 {
     Log.Fatal(ex, "Finex WMS API terminated unexpectedly during startup.");
 }
