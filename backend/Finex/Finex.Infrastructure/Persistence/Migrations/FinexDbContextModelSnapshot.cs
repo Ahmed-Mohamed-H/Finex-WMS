@@ -74,6 +74,11 @@ namespace Finex.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<int>("ProducedLineId")
                         .HasColumnType("int");
 
@@ -88,7 +93,9 @@ namespace Finex.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProducedLineId");
 
                     b.HasIndex("SsccBarcode")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasDatabaseName("UX_ProducedLineSsccBarcodes_ActiveSscc")
+                        .HasFilter("[IsActive] = 1");
 
                     b.ToTable("ProducedLineSsccBarcodes", (string)null);
                 });
@@ -116,6 +123,22 @@ namespace Finex.Infrastructure.Persistence.Migrations
                     b.Property<DateOnly>("ProductionDate")
                         .HasColumnType("date");
 
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset?>("ReviewedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ReviewedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("RevisionNumber")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
                     b.Property<string>("ShiftCode")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -134,10 +157,22 @@ namespace Finex.Infrastructure.Persistence.Migrations
                         .IsUnicode(false)
                         .HasColumnType("varchar(50)");
 
+                    b.Property<int>("Status")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
+                    b.Property<int?>("SupersededByReportId")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
+                    b.HasIndex("SupersededByReportId");
+
                     b.HasIndex("PlantCode", "LineCode", "ProductionDate", "ShiftCode")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasDatabaseName("UX_ShiftProductionReports_ActiveShift")
+                        .HasFilter("[Status] <> 3");
 
                     b.ToTable("ShiftProductionReports", (string)null);
                 });
@@ -162,6 +197,16 @@ namespace Finex.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("ProducedLine");
+                });
+
+            modelBuilder.Entity("Finex.Domain.Entities.ShiftProductionReport", b =>
+                {
+                    b.HasOne("Finex.Domain.Entities.ShiftProductionReport", "SupersededByReport")
+                        .WithMany()
+                        .HasForeignKey("SupersededByReportId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.Navigation("SupersededByReport");
                 });
 
             modelBuilder.Entity("Finex.Domain.Entities.ProducedLine", b =>

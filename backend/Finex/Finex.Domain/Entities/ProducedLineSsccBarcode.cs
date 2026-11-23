@@ -1,15 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+﻿namespace Finex.Domain.Entities;
 
-namespace Finex.Domain.Entities
+public sealed class ProducedLineSsccBarcode
 {
-    public class ProducedLineSsccBarcode
-    {
-        public int Id { get; set; }
-        public string SsccBarcode { get; set; } = string.Empty;
+    public int Id { get; set; }
+    public string SsccBarcode { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = true;
 
-        public int ProducedLineId { get; set; }
-        public ProducedLine ProducedLine { get; set; } = null!;
-    }
+    public int ProducedLineId { get; set; }
+    public ProducedLine ProducedLine { get; set; } = null!;
 }

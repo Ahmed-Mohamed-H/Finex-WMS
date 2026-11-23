@@ -17,8 +17,14 @@ namespace Finex.Infrastructure.Persistence.Configurations.Production
                 .IsUnicode(false)
                 .IsRequired();
 
+            builder.Property(x => x.IsActive)
+                .HasDefaultValue(true)
+                .IsRequired();
+
             builder.HasIndex(x => x.SsccBarcode)
-                .IsUnique();
+                .IsUnique()
+                .HasFilter("[IsActive] = 1")
+                .HasDatabaseName("UX_ProducedLineSsccBarcodes_ActiveSscc");
         }
     }
 }

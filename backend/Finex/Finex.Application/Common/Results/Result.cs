@@ -20,6 +20,7 @@ public class Result
 
     public static Result<T> Success<T>(T value) => new(value, true, Error.None);
     public static Result<T> Failure<T>(Error error) => new(default!, false, error);
+    public static implicit operator Result(Error error) => Failure(error);
 }
 
 public sealed class Result<T> : Result
