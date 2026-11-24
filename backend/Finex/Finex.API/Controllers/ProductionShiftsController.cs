@@ -229,7 +229,6 @@ public sealed class ProductionShiftsController(
             "Shift production reports retrieved successfully."));
     }
 
-    // TODO: Enable [Authorize(Roles = "ProductionManager,Admin")] once JWT RBAC is configured
     [HttpGet("reports/{reportId:int:min(1)}")]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [ProducesResponseType(typeof(ApiResponse<ShiftProductionReportDetailsDto>), StatusCodes.Status200OK)]

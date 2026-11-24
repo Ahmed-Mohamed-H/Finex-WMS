@@ -20,7 +20,6 @@ public class FinexDbContext(DbContextOptions<FinexDbContext> options)
         await strategy.ExecuteAsync(async () =>
         {
             ChangeTracker.Clear();
-
             await using var transaction = await Database.BeginTransactionAsync(cancellationToken);
             await action(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
