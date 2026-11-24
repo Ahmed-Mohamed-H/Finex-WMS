@@ -1,5 +1,5 @@
 ﻿using Finex.API.Observability;
-using Finex.Application.Interfaces;
+using Finex.Application.Interfaces.Production;
 using Finex.Infrastructure.Security;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;

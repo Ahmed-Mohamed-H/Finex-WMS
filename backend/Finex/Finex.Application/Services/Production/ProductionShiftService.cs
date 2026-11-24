@@ -3,13 +3,14 @@ using Finex.Application.Common.Models;
 using Finex.Application.Common.Results;
 using Finex.Application.DTOs.Production;
 using Finex.Application.Interfaces;
+using Finex.Application.Interfaces.Production;
 using Finex.Application.Mappings;
 using Finex.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using ZiggyCreatures.Caching.Fusion;
 
-namespace Finex.Application.Services;
+namespace Finex.Application.Services.Production;
 
 public sealed class ProductionShiftService(
     IFinexDbContext dbContext,

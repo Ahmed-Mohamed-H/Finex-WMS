@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Finex.Application.Validators
+namespace Finex.Application.Validators.Production
 {
     public sealed class ProducedLineDtoValidator : AbstractValidator<ProducedLineDto>
     {

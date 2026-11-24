@@ -50,4 +50,53 @@ public class FinexDbContext(DbContextOptions<FinexDbContext> options)
             return result;
         });
     }
+
+    public Task<List<ProductCategory>> GetCategoryAncestorsAsync(
+     int categoryId,
+     int maxDepth,
+     CancellationToken ct = default)
+    {
+        return ProductCategories
+            .FromSqlInterpolated($"""
+            WITH Ancestors AS (
+                SELECT Id, ParentCategoryId, 1 AS Depth
+                FROM ProductCategories
+                WHERE Id = {categoryId}
+                UNION ALL
+                SELECT p.Id, p.ParentCategoryId, a.Depth + 1
+                FROM ProductCategories p
+                INNER JOIN Ancestors a ON p.Id = a.ParentCategoryId
+                WHERE a.Depth < {maxDepth}
+            )
+            SELECT p.*
+            FROM ProductCategories p
+            INNER JOIN Ancestors a ON p.Id = a.Id
+            """)
+            .AsNoTracking()
+            .ToListAsync(ct);
+    }
+
+    public Task<List<ProductCategory>> GetCategorySubtreeAsync(
+        int rootCategoryId,
+        int maxDepth,
+        CancellationToken ct = default)
+    {
+        return ProductCategories
+            .FromSqlInterpolated($"""
+            WITH Subtree AS (
+                SELECT Id, ParentCategoryId, 1 AS Depth
+                FROM ProductCategories
+                WHERE Id = {rootCategoryId}
+                UNION ALL
+                SELECT c.Id, c.ParentCategoryId, s.Depth + 1
+                FROM ProductCategories c
+                INNER JOIN Subtree s ON c.ParentCategoryId = s.Id
+                WHERE s.Depth < {maxDepth}
+            )
+            SELECT c.*
+            FROM ProductCategories c
+            INNER JOIN Subtree s ON c.Id = s.Id
+            """)
+            .ToListAsync(ct);
+    }
 }

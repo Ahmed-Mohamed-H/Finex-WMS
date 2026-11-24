@@ -18,4 +18,14 @@ public interface IFinexDbContext
     Task<TResult> ExecuteInTransactionAsync<TResult>(
         Func<CancellationToken, Task<TResult>> action,
         CancellationToken cancellationToken = default);
+    Task<List<ProductCategory>> GetCategoryAncestorsAsync(
+    int categoryId,
+    int maxDepth,
+    CancellationToken ct = default);
+
+    Task<List<ProductCategory>> GetCategorySubtreeAsync(
+        int rootCategoryId,
+        int maxDepth,
+        CancellationToken ct = default);
+
 }

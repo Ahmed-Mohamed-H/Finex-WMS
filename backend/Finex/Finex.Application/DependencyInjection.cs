@@ -1,5 +1,7 @@
-﻿using Finex.Application.Interfaces;
-using Finex.Application.Services;
+﻿using Finex.Application.Interfaces.Catalog;
+using Finex.Application.Interfaces.Production;
+using Finex.Application.Services.Catalog;
+using Finex.Application.Services.Production;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 using System;
@@ -14,6 +16,7 @@ namespace Finex.Application
         {
             services.AddScoped<IProductionShiftService, ProductionShiftService>();
             services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
+            services.AddScoped<ICatalogService, CatalogService>();
             return services;
         }
     }

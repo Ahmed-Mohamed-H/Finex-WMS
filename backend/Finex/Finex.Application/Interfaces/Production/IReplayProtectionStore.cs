@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Finex.Application.Interfaces
+namespace Finex.Application.Interfaces.Production
 {
     public interface IReplayProtectionStore
     {

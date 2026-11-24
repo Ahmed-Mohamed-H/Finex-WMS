@@ -5,7 +5,7 @@ using Finex.API.Observability.Extensions;
 using Finex.API.Security;
 using Finex.API.Security.Extensions;
 using Finex.Application;
-using Finex.Application.Interfaces;
+using Finex.Application.Interfaces.Production;
 using Finex.Infrastructure;
 using Finex.Infrastructure.Security;
 using Microsoft.Extensions.Options;

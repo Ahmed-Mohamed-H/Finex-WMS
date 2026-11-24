@@ -3,7 +3,7 @@ using Finex.Application.Common.Results;
 using Finex.Application.DTOs.Production;
 using Finex.Domain.Enums;
 
-namespace Finex.Application.Interfaces;
+namespace Finex.Application.Interfaces.Production;
 
 public interface IProductionShiftService
 {
