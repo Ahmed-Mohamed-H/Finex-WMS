@@ -1,49 +1,47 @@
 ﻿using Finex.Application.Interfaces;
 using Finex.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
-namespace Finex.Infrastructure.Persistence
+namespace Finex.Infrastructure.Persistence;
+
+public class FinexDbContext(DbContextOptions<FinexDbContext> options)
+    : DbContext(options), IFinexDbContext
 {
-    public sealed class FinexDbContext : DbContext, IFinexDbContext
+    public DbSet<ShiftProductionReport> ShiftProductionReports => Set<ShiftProductionReport>();
+    public DbSet<ProducedLine> ProducedLines => Set<ProducedLine>();
+    public DbSet<ProducedLineSsccBarcode> ProducedLineSsccBarcodes => Set<ProducedLineSsccBarcode>();
+
+    public async Task ExecuteInTransactionAsync(
+        Func<CancellationToken, Task> action,
+        CancellationToken cancellationToken = default)
     {
-        public FinexDbContext(DbContextOptions<FinexDbContext> options)
-            : base(options)
+        var strategy = Database.CreateExecutionStrategy();
+
+        await strategy.ExecuteAsync(async () =>
         {
-        }
+            ChangeTracker.Clear();
 
-        public DbSet<ShiftProductionReport> ShiftProductionReports => Set<ShiftProductionReport>();
-        public DbSet<ProducedLine> ProducedLines => Set<ProducedLine>();
-        public DbSet<ProducedLineSsccBarcode> ProducedLineSsccBarcodes => Set<ProducedLineSsccBarcode>();
+            await using var transaction = await Database.BeginTransactionAsync(cancellationToken);
+            await action(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        });
+    }
 
-        public async Task ExecuteInTransactionAsync(
-            Func<CancellationToken, Task> action,
-            CancellationToken cancellationToken = default)
+    public async Task<TResult> ExecuteInTransactionAsync<TResult>(
+        Func<CancellationToken, Task<TResult>> action,
+        CancellationToken cancellationToken = default)
+    {
+        var strategy = Database.CreateExecutionStrategy();
+
+        return await strategy.ExecuteAsync(async () =>
         {
-            var strategy = Database.CreateExecutionStrategy();
+            ChangeTracker.Clear();
 
-            await strategy.ExecuteAsync(async () =>
-            {
-                await using var transaction = await Database.BeginTransactionAsync(cancellationToken);
-                try
-                {
-                    await action(cancellationToken);
-                    await transaction.CommitAsync(cancellationToken);
-                }
-                catch
-                {
-                    await transaction.RollbackAsync(cancellationToken);
-                    throw;
-                }
-            });
-        }
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
-        {
-            base.OnModelCreating(modelBuilder);
+            await using var transaction = await Database.BeginTransactionAsync(cancellationToken);
+            var result = await action(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
 
-            modelBuilder.ApplyConfigurationsFromAssembly(typeof(FinexDbContext).Assembly);
-        }
+            return result;
+        });
     }
 }

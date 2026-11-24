@@ -4,6 +4,7 @@ using Finex.API.Observability;
 using Finex.API.Security;
 using Finex.Application.DTOs;
 using Finex.Application.Interfaces;
+using Finex.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
 
@@ -123,5 +124,140 @@ public sealed class ProductionShiftsController(
             request.ReviewedBy);
 
         return FromResult(result, "The shift report has been rejected and unlocked for resubmission.");
+    }
+
+    [HttpPost("reports/{reportId:int}/approve")]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<ApiResponse>> ApproveShiftReport(
+        [FromRoute] int reportId,
+        [FromBody] ApproveShiftReportRequest request,
+        CancellationToken cancellationToken)
+    {
+        using var activity = FinexDiagnostics.ActivitySource.StartActivity(
+            "ProductionShiftsController.ApproveShiftReport",
+            ActivityKind.Internal);
+
+        activity?.SetTag("production.report_id", reportId);
+        activity?.SetTag("production.reviewer_code", request.ReviewedBy);
+        activity?.AddEvent(new ActivityEvent("Starting shift production report approval"));
+
+        logger.LogInformation(
+            "Attempting to approve shift production report {ReportId} by Reviewer {ReviewerCode}.",
+            reportId,
+            request.ReviewedBy);
+
+        var result = await shiftService.ApproveShiftReportAsync(
+            reportId,
+            request.ReviewedBy,
+            cancellationToken);
+
+        if (result.IsFailure)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, result.Error.Code);
+            activity?.SetTag("error.code", result.Error.Code);
+            activity?.AddEvent(new ActivityEvent($"Shift report approval failed: {result.Error.Code}"));
+
+            logger.LogWarning(
+                "Failed to approve shift report {ReportId}. Reason: {ErrorCode} - {ErrorDescription}",
+                reportId,
+                result.Error.Code,
+                result.Error.Description);
+
+            return FromResult(result);
+        }
+
+        activity?.AddEvent(new ActivityEvent("Shift production report approved and locked successfully"));
+
+        logger.LogInformation(
+            "Shift report {ReportId} was approved by Reviewer {ReviewerCode}.",
+            reportId,
+            request.ReviewedBy);
+
+        return FromResult(result, "The shift report has been approved and locked for inventory.");
+    }
+
+    // TODO: Enable [Authorize(Roles = "ProductionManager,Admin")] once JWT RBAC is configured
+    [HttpGet("reports")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    [ProducesResponseType(typeof(PagedResponse<ShiftProductionReportSummaryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<PagedResponse<ShiftProductionReportSummaryDto>>> GetShiftReports(
+        [FromQuery] ShiftReportStatus? status,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        using var activity = FinexDiagnostics.ActivitySource.StartActivity(
+            "ProductionShiftsController.GetShiftReports",
+            ActivityKind.Internal);
+
+        activity?.SetTag("production.filter_status", status?.ToString() ?? "All");
+        activity?.SetTag("pagination.page", page);
+        activity?.SetTag("pagination.page_size", pageSize);
+        activity?.AddEvent(new ActivityEvent("Starting shift production reports query"));
+
+        var result = await shiftService.GetShiftReportsAsync(status, page, pageSize, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, result.Error.Code);
+            activity?.SetTag("error.code", result.Error.Code);
+            activity?.AddEvent(new ActivityEvent($"Shift reports query failed: {result.Error.Code}"));
+
+            logger.LogWarning(
+                "Invalid shift reports query (Status: {Status}, Page: {Page}, PageSize: {PageSize}). Reason: {ErrorCode}",
+                status,
+                page,
+                pageSize,
+                result.Error.Code);
+
+            return FromResult(result).Result!;
+        }
+
+        var pagedData = result.Value;
+        activity?.SetTag("production.total_count", pagedData.TotalCount);
+        activity?.AddEvent(new ActivityEvent("Shift production reports retrieved successfully"));
+
+        return Ok(PagedResponse<ShiftProductionReportSummaryDto>.Ok(
+            pagedData.Items,
+            pagedData.Page,
+            pagedData.PageSize,
+            pagedData.TotalCount,
+            "Shift production reports retrieved successfully."));
+    }
+
+    // TODO: Enable [Authorize(Roles = "ProductionManager,Admin")] once JWT RBAC is configured
+    [HttpGet("reports/{reportId:int:min(1)}")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    [ProducesResponseType(typeof(ApiResponse<ShiftProductionReportDetailsDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ApiResponse<ShiftProductionReportDetailsDto>>> GetShiftReportById(
+        [FromRoute] int reportId,
+        CancellationToken cancellationToken = default)
+    {
+        using var activity = FinexDiagnostics.ActivitySource.StartActivity(
+            "ProductionShiftsController.GetShiftReportById",
+            ActivityKind.Internal);
+
+        activity?.SetTag("production.report_id", reportId);
+        activity?.AddEvent(new ActivityEvent("Starting shift production report details lookup"));
+
+        var result = await shiftService.GetShiftReportByIdAsync(reportId, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, result.Error.Code);
+            activity?.SetTag("error.code", result.Error.Code);
+            activity?.AddEvent(new ActivityEvent($"Shift report lookup failed: {result.Error.Code}"));
+
+            return FromResult(result);
+        }
+
+        activity?.AddEvent(new ActivityEvent("Shift production report details retrieved successfully"));
+        return FromResult(result, "Shift production report retrieved successfully.");
     }
 }
