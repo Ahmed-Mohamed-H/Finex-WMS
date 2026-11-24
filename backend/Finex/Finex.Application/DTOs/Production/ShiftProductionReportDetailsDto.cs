@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Finex.Application.DTOs
+namespace Finex.Application.DTOs.Production
 {
     public sealed record ShiftProductionReportDetailsDto(
      int Id,

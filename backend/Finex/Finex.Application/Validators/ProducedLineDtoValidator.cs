@@ -1,4 +1,4 @@
-﻿using Finex.Application.DTOs;
+﻿using Finex.Application.DTOs.Production;
 using FluentValidation;
 using System;
 using System.Collections.Generic;

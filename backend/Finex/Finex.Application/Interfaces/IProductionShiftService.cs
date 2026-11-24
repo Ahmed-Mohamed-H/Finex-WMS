@@ -1,6 +1,6 @@
 ﻿using Finex.Application.Common.Models;
 using Finex.Application.Common.Results;
-using Finex.Application.DTOs;
+using Finex.Application.DTOs.Production;
 using Finex.Domain.Enums;
 
 namespace Finex.Application.Interfaces;

@@ -1,7 +1,7 @@
 ﻿using System.Diagnostics;
 using Finex.Application.Common.Models;
 using Finex.Application.Common.Results;
-using Finex.Application.DTOs;
+using Finex.Application.DTOs.Production;
 using Finex.Application.Interfaces;
 using Finex.Application.Mappings;
 using Finex.Domain.Enums;

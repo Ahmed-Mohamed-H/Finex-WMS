@@ -2,7 +2,7 @@
 using Finex.API.Contracts.Production;
 using Finex.API.Observability;
 using Finex.API.Security;
-using Finex.Application.DTOs;
+using Finex.Application.DTOs.Production;
 using Finex.Application.Interfaces;
 using Finex.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;

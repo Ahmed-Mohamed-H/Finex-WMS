@@ -1,4 +1,4 @@
-﻿using Finex.Application.DTOs;
+﻿using Finex.Application.DTOs.Production;
 using Finex.Domain.Entities;
 using Finex.Domain.Enums;
 using Riok.Mapperly.Abstractions;
