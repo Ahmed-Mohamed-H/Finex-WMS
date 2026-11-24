@@ -10,6 +10,13 @@ public class FinexDbContext(DbContextOptions<FinexDbContext> options)
     public DbSet<ShiftProductionReport> ShiftProductionReports => Set<ShiftProductionReport>();
     public DbSet<ProducedLine> ProducedLines => Set<ProducedLine>();
     public DbSet<ProducedLineSsccBarcode> ProducedLineSsccBarcodes => Set<ProducedLineSsccBarcode>();
+    public DbSet<ProductCategory> ProductCategories => Set<ProductCategory>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+        modelBuilder.ApplyConfigurationsFromAssembly(typeof(FinexDbContext).Assembly);
+    }
 
     public async Task ExecuteInTransactionAsync(
         Func<CancellationToken, Task> action,

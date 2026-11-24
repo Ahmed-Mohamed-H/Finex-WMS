@@ -100,6 +100,75 @@ namespace Finex.Infrastructure.Persistence.Migrations
                     b.ToTable("ProducedLineSsccBarcodes", (string)null);
                 });
 
+            modelBuilder.Entity("Finex.Domain.Entities.ProductCategory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Level")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<int?>("ParentCategoryId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("UpdatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ProductCategories_Code");
+
+                    b.HasIndex("Name")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ProductCategories_RootName")
+                        .HasFilter("[ParentCategoryId] IS NULL");
+
+                    b.HasIndex("ParentCategoryId")
+                        .HasDatabaseName("IX_ProductCategories_ParentCategoryId");
+
+                    b.HasIndex("ParentCategoryId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ProductCategories_ParentId_Name")
+                        .HasFilter("[ParentCategoryId] IS NOT NULL");
+
+                    b.HasIndex("IsActive", "Level", "ParentCategoryId")
+                        .HasDatabaseName("IX_ProductCategories_ActiveHierarchy")
+                        .HasFilter("[IsActive] = 1");
+
+                    b.ToTable("ProductCategories", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProductCategories_NoSelfParent", "[ParentCategoryId] IS NULL OR [ParentCategoryId] <> [Id]");
+
+                            t.HasCheckConstraint("CK_ProductCategories_ValidLevel", "([ParentCategoryId] IS NULL AND [Level] = 1) OR ([ParentCategoryId] IS NOT NULL AND [Level] >= 2)");
+                        });
+                });
+
             modelBuilder.Entity("Finex.Domain.Entities.ShiftProductionReport", b =>
                 {
                     b.Property<int>("Id")
@@ -199,6 +268,16 @@ namespace Finex.Infrastructure.Persistence.Migrations
                     b.Navigation("ProducedLine");
                 });
 
+            modelBuilder.Entity("Finex.Domain.Entities.ProductCategory", b =>
+                {
+                    b.HasOne("Finex.Domain.Entities.ProductCategory", "ParentCategory")
+                        .WithMany("SubCategories")
+                        .HasForeignKey("ParentCategoryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("ParentCategory");
+                });
+
             modelBuilder.Entity("Finex.Domain.Entities.ShiftProductionReport", b =>
                 {
                     b.HasOne("Finex.Domain.Entities.ShiftProductionReport", "SupersededByReport")
@@ -212,6 +291,11 @@ namespace Finex.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Finex.Domain.Entities.ProducedLine", b =>
                 {
                     b.Navigation("SsccBarcodes");
+                });
+
+            modelBuilder.Entity("Finex.Domain.Entities.ProductCategory", b =>
+                {
+                    b.Navigation("SubCategories");
                 });
 
             modelBuilder.Entity("Finex.Domain.Entities.ShiftProductionReport", b =>

@@ -8,7 +8,7 @@ public interface IFinexDbContext
     DbSet<ShiftProductionReport> ShiftProductionReports { get; }
     DbSet<ProducedLine> ProducedLines { get; }
     DbSet<ProducedLineSsccBarcode> ProducedLineSsccBarcodes { get; }
-
+    DbSet<ProductCategory> ProductCategories { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     Task ExecuteInTransactionAsync(
