@@ -9,6 +9,7 @@ public interface IFinexDbContext
     DbSet<ProducedLine> ProducedLines { get; }
     DbSet<ProducedLineSsccBarcode> ProducedLineSsccBarcodes { get; }
     DbSet<ProductCategory> ProductCategories { get; }
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     Task ExecuteInTransactionAsync(
@@ -18,6 +19,7 @@ public interface IFinexDbContext
     Task<TResult> ExecuteInTransactionAsync<TResult>(
         Func<CancellationToken, Task<TResult>> action,
         CancellationToken cancellationToken = default);
+
     Task<List<ProductCategory>> GetCategoryAncestorsAsync(
     int categoryId,
     int maxDepth,
@@ -27,5 +29,4 @@ public interface IFinexDbContext
         int rootCategoryId,
         int maxDepth,
         CancellationToken ct = default);
-
 }

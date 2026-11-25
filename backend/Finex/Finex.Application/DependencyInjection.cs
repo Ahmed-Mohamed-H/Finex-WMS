@@ -4,9 +4,6 @@ using Finex.Application.Services.Catalog;
 using Finex.Application.Services.Production;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Finex.Application
 {

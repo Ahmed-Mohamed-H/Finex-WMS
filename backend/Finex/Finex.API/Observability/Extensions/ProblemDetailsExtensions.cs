@@ -1,5 +1,5 @@
-﻿using System.Diagnostics;
-using Microsoft.AspNetCore.Http.Features;
+﻿using Microsoft.AspNetCore.Http.Features;
+using System.Diagnostics;
 
 namespace Finex.API.Infrastructure.Observability;
 

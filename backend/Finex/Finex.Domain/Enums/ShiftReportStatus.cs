@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Finex.Domain.Enums
+﻿namespace Finex.Domain.Enums
 {
     public enum ShiftReportStatus
     {

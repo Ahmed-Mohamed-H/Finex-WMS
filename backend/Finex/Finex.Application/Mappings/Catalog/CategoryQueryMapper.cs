@@ -1,9 +1,6 @@
 ﻿using Finex.Application.DTOs.Catalog;
 using Finex.Domain.Entities;
 using Riok.Mapperly.Abstractions;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Finex.Application.Mappings.Catalog
 {

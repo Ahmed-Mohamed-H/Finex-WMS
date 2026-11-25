@@ -38,7 +38,7 @@ namespace Finex.API.Middlewares
                     httpContext.Request.Method,
                     httpContext.Request.Path);
 
-                httpContext.Response.StatusCode = 499; 
+                httpContext.Response.StatusCode = 499;
                 return true;
             }
 

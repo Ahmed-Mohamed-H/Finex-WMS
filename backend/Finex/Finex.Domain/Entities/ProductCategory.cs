@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Finex.Domain.Entities
+﻿namespace Finex.Domain.Entities
 {
     public sealed class ProductCategory
     {
@@ -11,7 +7,6 @@ namespace Finex.Domain.Entities
         public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
 
-       
         public int Level { get; set; } = 1;
 
         public bool IsActive { get; set; } = true;

@@ -1,5 +1,4 @@
-﻿using System.Diagnostics;
-using Finex.Application.Common.Models;
+﻿using Finex.Application.Common.Models;
 using Finex.Application.Common.Results;
 using Finex.Application.DTOs.Production;
 using Finex.Application.Interfaces;
@@ -8,6 +7,7 @@ using Finex.Application.Mappings;
 using Finex.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using ZiggyCreatures.Caching.Fusion;
 
 namespace Finex.Application.Services.Production;

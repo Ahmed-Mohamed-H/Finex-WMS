@@ -1,6 +1,6 @@
 ﻿using Finex.API.Contracts.Common;
-using Finex.Application.Common.Results;
 using Finex.API.Extensions;
+using Finex.Application.Common.Results;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Finex.API.Controllers;

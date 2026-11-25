@@ -2,7 +2,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-
 namespace Finex.Infrastructure.Persistence.Configurations.Production
 {
     public sealed class ProducedLineConfiguration : IEntityTypeConfiguration<ProducedLine>
@@ -19,7 +18,7 @@ namespace Finex.Infrastructure.Persistence.Configurations.Production
                 .IsRequired();
 
             builder.Property(x => x.UnitName)
-                .HasMaxLength(150) 
+                .HasMaxLength(150)
                 .IsRequired();
 
             builder.Property(x => x.UnitBarcode)

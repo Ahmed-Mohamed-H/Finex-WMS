@@ -1,7 +1,4 @@
 ﻿using Finex.Application.Interfaces.Production;
-using System;
-using System.Collections.Generic;
-using System.Text;
 using ZiggyCreatures.Caching.Fusion;
 
 namespace Finex.Infrastructure.Security

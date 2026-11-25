@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Finex.Domain.Entities
+﻿namespace Finex.Domain.Entities
 {
     public class ProducedLine
     {

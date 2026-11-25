@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Finex.Application.DTOs.Production
+﻿namespace Finex.Application.DTOs.Production
 {
     public sealed class ShiftProductionReportDto
     {

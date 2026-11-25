@@ -1,8 +1,5 @@
 ﻿using Finex.Application.DTOs.Production;
 using FluentValidation;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Finex.Application.Validators.Production
 {

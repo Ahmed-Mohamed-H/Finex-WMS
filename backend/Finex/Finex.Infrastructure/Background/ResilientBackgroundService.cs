@@ -1,9 +1,6 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Text;
 
 namespace Finex.Infrastructure.Background
 {
@@ -11,23 +8,19 @@ namespace Finex.Infrastructure.Background
     ILogger logger,
     TimeSpan? failureBackoff = null) : BackgroundService
     {
-
         private static readonly ActivitySource BackgroundActivitySource = new("Finex.WMS.API.BackgroundWorkers");
         private readonly TimeSpan _backoff = failureBackoff ?? TimeSpan.FromSeconds(5);
 
         protected abstract string WorkerName { get; }
 
-
-
         protected abstract Task ExecuteIterationAsync(CancellationToken stoppingToken);
 
-        protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
+        protected override sealed async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             logger.LogInformation("Background worker {WorkerName} started.", WorkerName);
 
             while (!stoppingToken.IsCancellationRequested)
             {
-
                 using Activity? activity = BackgroundActivitySource.StartActivity(
                     $"{WorkerName}.Iteration",
                     ActivityKind.Internal);
@@ -38,12 +31,10 @@ namespace Finex.Infrastructure.Background
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
-
                     break;
                 }
                 catch (Exception ex)
                 {
-
                     activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
                     activity?.SetTag("exception.type", ex.GetType().FullName);
 
