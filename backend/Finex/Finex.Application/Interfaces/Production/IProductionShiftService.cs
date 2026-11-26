@@ -1,7 +1,7 @@
 ﻿using Finex.Application.Common.Models;
 using Finex.Application.Common.Results;
 using Finex.Application.DTOs.Production;
-using Finex.Domain.Enums;
+using Finex.Domain.Enums.Production;
 
 namespace Finex.Application.Interfaces.Production;
 

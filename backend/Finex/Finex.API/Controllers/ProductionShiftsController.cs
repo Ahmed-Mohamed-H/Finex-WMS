@@ -4,7 +4,7 @@ using Finex.API.Observability;
 using Finex.API.Security;
 using Finex.Application.DTOs.Production;
 using Finex.Application.Interfaces.Production;
-using Finex.Domain.Enums;
+using Finex.Domain.Enums.Production;
 using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
 

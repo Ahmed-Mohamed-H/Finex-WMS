@@ -1,6 +1,6 @@
 ﻿using Finex.Application.DTOs.Production;
 using Finex.Domain.Entities;
-using Finex.Domain.Enums;
+using Finex.Domain.Enums.Production;
 using Riok.Mapperly.Abstractions;
 
 namespace Finex.Application.Mappings;

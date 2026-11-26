@@ -4,7 +4,7 @@ using Finex.Application.DTOs.Production;
 using Finex.Application.Interfaces;
 using Finex.Application.Interfaces.Production;
 using Finex.Application.Mappings;
-using Finex.Domain.Enums;
+using Finex.Domain.Enums.Production;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;

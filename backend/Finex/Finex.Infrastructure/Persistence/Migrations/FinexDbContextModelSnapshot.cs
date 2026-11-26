@@ -100,6 +100,111 @@ namespace Finex.Infrastructure.Persistence.Migrations
                     b.ToTable("ProducedLineSsccBarcodes", (string)null);
                 });
 
+            modelBuilder.Entity("Finex.Domain.Entities.Product", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CartonBarcode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("CategoryId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("MaxStackLayers")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MinStockLevel")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int?>("ShelfLifeDays")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Sku")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("TechnicalSpecs")
+                        .IsRequired()
+                        .HasColumnType("json");
+
+                    b.Property<string>("TrackingMode")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("UnitBarcode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset?>("UpdatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CartonBarcode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Products_CartonBarcode")
+                        .HasFilter("[CartonBarcode] IS NOT NULL");
+
+                    b.HasIndex("Sku")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Products_Sku");
+
+                    b.HasIndex("UnitBarcode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Products_UnitBarcode")
+                        .HasFilter("[UnitBarcode] IS NOT NULL");
+
+                    b.HasIndex("CategoryId", "Status")
+                        .HasDatabaseName("IX_Products_CategoryId_Status");
+
+                    b.ToTable("Products", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Products_DistinctBarcodes", "[UnitBarcode] IS NULL OR [CartonBarcode] IS NULL OR [UnitBarcode] <> [CartonBarcode]");
+
+                            t.HasCheckConstraint("CK_Products_ValidDimensions", "[LengthCm] > 0 AND [WidthCm] > 0 AND [HeightCm] > 0");
+
+                            t.HasCheckConstraint("CK_Products_ValidMaxStackLayers", "[MaxStackLayers] IS NULL OR [MaxStackLayers] >= 1");
+
+                            t.HasCheckConstraint("CK_Products_ValidMinStockLevel", "[MinStockLevel] IS NULL OR [MinStockLevel] >= 0");
+
+                            t.HasCheckConstraint("CK_Products_ValidPackCapacity", "[PackCapacity] >= 1");
+
+                            t.HasCheckConstraint("CK_Products_ValidShelfLife", "([TrackingMode] <> 'BatchAndExpiry' AND ([ShelfLifeDays] IS NULL OR [ShelfLifeDays] > 0)) OR ([TrackingMode] = 'BatchAndExpiry' AND [ShelfLifeDays] > 0)");
+
+                            t.HasCheckConstraint("CK_Products_ValidWeights", "[NetWeightGrams] > 0 AND [GrossWeightGrams] >= [NetWeightGrams]");
+                        });
+                });
+
             modelBuilder.Entity("Finex.Domain.Entities.ProductCategory", b =>
                 {
                     b.Property<int>("Id")
@@ -107,6 +212,9 @@ namespace Finex.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AttributeSchema")
+                        .HasColumnType("json");
 
                     b.Property<string>("Code")
                         .IsRequired()
@@ -266,6 +374,81 @@ namespace Finex.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("ProducedLine");
+                });
+
+            modelBuilder.Entity("Finex.Domain.Entities.Product", b =>
+                {
+                    b.HasOne("Finex.Domain.Entities.ProductCategory", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.OwnsOne("Finex.Domain.ValueObjects.Catalog.PhysicalProperties", "PhysicalProperties", b1 =>
+                        {
+                            b1.Property<int>("ProductId")
+                                .HasColumnType("int");
+
+                            b1.Property<decimal>("GrossWeightGrams")
+                                .HasPrecision(12, 2)
+                                .HasColumnType("decimal(12,2)")
+                                .HasColumnName("GrossWeightGrams");
+
+                            b1.Property<decimal>("HeightCm")
+                                .HasPrecision(10, 2)
+                                .HasColumnType("decimal(10,2)")
+                                .HasColumnName("HeightCm");
+
+                            b1.Property<decimal>("LengthCm")
+                                .HasPrecision(10, 2)
+                                .HasColumnType("decimal(10,2)")
+                                .HasColumnName("LengthCm");
+
+                            b1.Property<decimal>("NetWeightGrams")
+                                .HasPrecision(12, 2)
+                                .HasColumnType("decimal(12,2)")
+                                .HasColumnName("NetWeightGrams");
+
+                            b1.Property<int>("PackCapacity")
+                                .HasColumnType("int")
+                                .HasColumnName("PackCapacity");
+
+                            b1.Property<string>("PackagingType")
+                                .IsRequired()
+                                .HasMaxLength(30)
+                                .HasColumnType("nvarchar(30)")
+                                .HasColumnName("PackagingType");
+
+                            b1.Property<string>("StorageZone")
+                                .IsRequired()
+                                .HasMaxLength(30)
+                                .HasColumnType("nvarchar(30)")
+                                .HasColumnName("StorageZone");
+
+                            b1.Property<decimal>("VolumeCm3")
+                                .ValueGeneratedOnAddOrUpdate()
+                                .HasPrecision(18, 2)
+                                .HasColumnType("decimal(18,2)")
+                                .HasColumnName("VolumeCm3")
+                                .HasComputedColumnSql("ROUND([LengthCm] * [WidthCm] * [HeightCm], 2)", true);
+
+                            b1.Property<decimal>("WidthCm")
+                                .HasPrecision(10, 2)
+                                .HasColumnType("decimal(10,2)")
+                                .HasColumnName("WidthCm");
+
+                            b1.HasKey("ProductId");
+
+                            b1.ToTable("Products");
+
+                            b1.WithOwner()
+                                .HasForeignKey("ProductId");
+                        });
+
+                    b.Navigation("Category");
+
+                    b.Navigation("PhysicalProperties")
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Finex.Domain.Entities.ProductCategory", b =>

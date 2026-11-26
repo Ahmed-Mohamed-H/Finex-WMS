@@ -1,4 +1,4 @@
-﻿namespace Finex.Domain.Enums
+﻿namespace Finex.Domain.Enums.Production
 {
     public enum ShiftReportStatus
     {

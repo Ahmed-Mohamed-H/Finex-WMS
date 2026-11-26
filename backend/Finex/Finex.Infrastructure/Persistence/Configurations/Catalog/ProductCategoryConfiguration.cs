@@ -1,8 +1,13 @@
 ﻿using Finex.Domain.Entities;
+using Finex.Domain.ValueObjects.Catalog;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
-namespace Finex.Infrastructure.Persistence.Configurations.Categories
+namespace Finex.Infrastructure.Persistence.Configurations.Catalog
 {
     public sealed class ProductCategoryConfiguration : IEntityTypeConfiguration<ProductCategory>
     {
@@ -69,6 +74,25 @@ namespace Finex.Infrastructure.Persistence.Configurations.Categories
                 .WithMany(c => c.SubCategories)
                 .HasForeignKey(c => c.ParentCategoryId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            var schemaJsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                Converters = { new JsonStringEnumConverter() }
+            };
+
+            var schemaConverter = new ValueConverter<CategoryAttributeSchema?, string?>(
+                v => v == null ? null : JsonSerializer.Serialize(v, schemaJsonOptions),
+                v => string.IsNullOrWhiteSpace(v) ? null : JsonSerializer.Deserialize<CategoryAttributeSchema>(v, schemaJsonOptions));
+
+            var schemaComparer = new ValueComparer<CategoryAttributeSchema?>(
+                (a, b) => JsonSerializer.Serialize(a, schemaJsonOptions) == JsonSerializer.Serialize(b, schemaJsonOptions),
+                v => v == null ? 0 : JsonSerializer.Serialize(v, schemaJsonOptions).GetHashCode(),
+                v => v == null ? null : JsonSerializer.Deserialize<CategoryAttributeSchema>(JsonSerializer.Serialize(v, schemaJsonOptions), schemaJsonOptions));
+
+            builder.Property(c => c.AttributeSchema)
+               .HasColumnType("json")
+               .HasConversion(schemaConverter, schemaComparer)
+               .IsRequired(false);
         }
     }
 }

@@ -1,5 +1,5 @@
 ﻿using Finex.Domain.Entities;
-using Finex.Domain.Enums;
+using Finex.Domain.Enums.Production;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 

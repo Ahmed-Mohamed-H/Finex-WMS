@@ -1,4 +1,4 @@
-﻿using Finex.Domain.Enums;
+﻿using Finex.Domain.Enums.Production;
 
 namespace Finex.Domain.Entities;
 

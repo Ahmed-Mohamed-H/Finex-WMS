@@ -11,7 +11,7 @@ public class FinexDbContext(DbContextOptions<FinexDbContext> options)
     public DbSet<ProducedLine> ProducedLines => Set<ProducedLine>();
     public DbSet<ProducedLineSsccBarcode> ProducedLineSsccBarcodes => Set<ProducedLineSsccBarcode>();
     public DbSet<ProductCategory> ProductCategories => Set<ProductCategory>();
-
+    public DbSet<Product> Products => Set<Product>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

@@ -1,4 +1,6 @@
-﻿namespace Finex.Domain.Entities
+﻿using Finex.Domain.ValueObjects.Catalog;
+
+namespace Finex.Domain.Entities
 {
     public sealed class ProductCategory
     {
@@ -10,6 +12,7 @@
         public int Level { get; set; } = 1;
 
         public bool IsActive { get; set; } = true;
+        public CategoryAttributeSchema? AttributeSchema { get; set; }
         public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
         public DateTimeOffset? UpdatedAtUtc { get; set; }
 
