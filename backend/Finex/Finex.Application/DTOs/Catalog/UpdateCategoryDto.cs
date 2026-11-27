@@ -3,4 +3,7 @@
 public sealed record UpdateCategoryDto(
     string Name,
     string? Description = null,
-    IReadOnlyList<AttributeDefinitionDto>? Attributes = null);
+    IReadOnlyList<AttributeDefinitionDto>? Attributes = null)
+{
+    public bool ForceBreakingChanges { get; init; }
+}

@@ -1,6 +1,8 @@
 ﻿using Finex.Application.Interfaces;
 using Finex.Domain.Entities;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace Finex.Infrastructure.Persistence;
 
@@ -98,5 +100,63 @@ public class FinexDbContext(DbContextOptions<FinexDbContext> options)
             INNER JOIN Subtree s ON c.Id = s.Id
             """)
             .ToListAsync(ct);
+    }
+
+    public async Task<int> CountProductsWithAttributeKeyAsync(
+    IReadOnlyCollection<int> categoryIds,
+    string attributeKey,
+    CancellationToken ct = default)
+    {
+        if (categoryIds.Count == 0)
+            return 0;
+
+        var categoryIdsJson = JsonSerializer.Serialize(categoryIds);
+        var jsonPath = $"$.{attributeKey}";
+
+        var sql = """
+        SELECT COUNT(*) AS [Value]
+        FROM [Products] AS p
+        WHERE p.[CategoryId] IN (
+            SELECT CAST([value] AS int) FROM OPENJSON(@categoryIdsJson)
+        )
+        AND JSON_PATH_EXISTS(p.[TechnicalSpecs], @jsonPath) = 1
+        """;
+
+        return await Database
+            .SqlQueryRaw<int>(
+                sql,
+                new SqlParameter("@categoryIdsJson", categoryIdsJson),
+                new SqlParameter("@jsonPath", jsonPath))
+            .SingleAsync(ct);
+    }
+
+    public async Task<int> CountProductsWithAttributeValueAsync(
+        IReadOnlyCollection<int> categoryIds,
+        string attributeKey,
+        string attributeValue,
+        CancellationToken ct = default)
+    {
+        if (categoryIds.Count == 0)
+            return 0;
+
+        var categoryIdsJson = JsonSerializer.Serialize(categoryIds);
+        var jsonPath = $"$.{attributeKey}";
+
+        var sql = """
+        SELECT COUNT(*) AS [Value]
+        FROM [Products] AS p
+        WHERE p.[CategoryId] IN (
+            SELECT CAST([value] AS int) FROM OPENJSON(@categoryIdsJson)
+        )
+        AND JSON_VALUE(p.[TechnicalSpecs], @jsonPath) = @attributeValue
+        """;
+
+        return await Database
+            .SqlQueryRaw<int>(
+                sql,
+                new SqlParameter("@categoryIdsJson", categoryIdsJson),
+                new SqlParameter("@jsonPath", jsonPath),
+                new SqlParameter("@attributeValue", attributeValue))
+            .SingleAsync(ct);
     }
 }

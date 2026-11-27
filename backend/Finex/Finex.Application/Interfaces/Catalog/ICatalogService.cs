@@ -17,6 +17,10 @@ public interface ICatalogService
         int id,
         CancellationToken ct = default);
 
+    Task<Result<EffectiveCategorySchemaDto>> GetEffectiveSchemaAsync(
+        int categoryId,
+        CancellationToken ct = default);
+
     Task<Result<CategoryDetailsDto>> UpdateCategoryAsync(
         int id,
         UpdateCategoryDto dto,

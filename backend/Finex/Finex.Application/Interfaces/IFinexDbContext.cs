@@ -29,4 +29,15 @@ public interface IFinexDbContext
         int rootCategoryId,
         int maxDepth,
         CancellationToken ct = default);
+
+    Task<int> CountProductsWithAttributeKeyAsync(
+    IReadOnlyCollection<int> categoryIds,
+    string attributeKey,
+    CancellationToken ct = default);
+
+    Task<int> CountProductsWithAttributeValueAsync(
+        IReadOnlyCollection<int> categoryIds,
+        string attributeKey,
+        string attributeValue,
+        CancellationToken ct = default);
 }

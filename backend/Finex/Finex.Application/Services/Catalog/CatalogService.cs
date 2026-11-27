@@ -1,23 +1,22 @@
-﻿using Finex.Application.Common.Results;
+﻿using System.Diagnostics;
+using Finex.Application.Common.Results;
 using Finex.Application.DTOs.Catalog;
 using Finex.Application.Interfaces;
 using Finex.Application.Interfaces.Catalog;
 using Finex.Application.Mappings.Catalog;
+using Finex.Domain.Entities;
+using Finex.Domain.ValueObjects.Catalog;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using System.Diagnostics;
-using ZiggyCreatures.Caching.Fusion;
 
 namespace Finex.Application.Services.Catalog;
 
 public sealed class CatalogService(
     IFinexDbContext dbContext,
-    IFusionCache cache,
+    ICategoryCatalogCache catalogCache,
     ILogger<CatalogService> logger) : ICatalogService
 {
-    private const string CatalogTreeTag = "catalog:tree";
-    private const string ActiveTreeCacheKey = "catalog:tree:active";
-    private const string AllTreeCacheKey = "catalog:tree:all";
     private const int MaxTreeDepth = 20;
     private const int CteRecursionGuard = 100;
 
@@ -29,8 +28,38 @@ public sealed class CatalogService(
     {
         using var activity = ActivitySource.StartActivity(nameof(CreateCategoryAsync));
 
+        if (string.IsNullOrWhiteSpace(dto.Code))
+            return Error.Validation("Catalog.InvalidCode", "Category code is required.");
+
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            return Error.Validation("Catalog.InvalidName", "Category name is required.");
+
         var normalizedCode = dto.Code.Trim().ToUpperInvariant();
         var normalizedName = dto.Name.Trim();
+        var normalizedDescription = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim();
+
+        CategoryAttributeSchema? schema = null;
+        if (dto.ParentCategoryId is null)
+        {
+            if (dto.Attributes is null || dto.Attributes.Count == 0)
+            {
+                return Error.Validation(
+                    "Catalog.RootSchemaRequired",
+                    "A root category must define at least one custom attribute in its schema.");
+            }
+
+            var schemaResult = BuildValidatedSchema(dto.Attributes);
+            if (schemaResult.IsFailure)
+                return schemaResult.Error;
+
+            schema = schemaResult.Value;
+        }
+        else if (dto.Attributes is { Count: > 0 })
+        {
+            return Error.Validation(
+                "Catalog.SubCategorySchemaForbidden",
+                "Subcategories inherit their attribute schema from the root category and cannot define their own schema.");
+        }
 
         var codeExists = await dbContext.ProductCategories
             .AsNoTracking()
@@ -41,7 +70,7 @@ public sealed class CatalogService(
             logger.LogWarning("Category creation rejected due to duplicate code {CategoryCode}", normalizedCode);
             return Error.Conflict(
                 "Catalog.DuplicateConflict",
-                "A category with this code or name already exists.");
+                $"A category with code '{normalizedCode}' already exists.");
         }
 
         var level = 1;
@@ -56,16 +85,23 @@ public sealed class CatalogService(
                 .Select(c => new { c.Id, c.Code, c.Name, c.Level, c.IsActive })
                 .FirstOrDefaultAsync(ct);
 
-            if (parent is null || !parent.IsActive)
+            if (parent is null)
+            {
+                return Error.NotFound(
+                    "Catalog.ParentNotFound",
+                    $"Parent category with ID '{dto.ParentCategoryId.Value}' was not found.");
+            }
+
+            if (!parent.IsActive)
             {
                 logger.LogWarning(
-                    "Category creation rejected for code {CategoryCode}: target parent {ParentId} is missing or inactive",
+                    "Category creation rejected for code {CategoryCode}: target parent {ParentId} is inactive",
                     normalizedCode,
-                    dto.ParentCategoryId.Value);
+                    parent.Id);
 
-                return Error.Conflict(
-                    "Catalog.InvalidHierarchy",
-                    "The category cannot be assigned under the specified parent.");
+                return Error.Failure(
+                    "Catalog.ParentInactive",
+                    "Cannot create a subcategory under an inactive parent category.");
             }
 
             if (parent.Level + 1 > MaxTreeDepth)
@@ -77,7 +113,7 @@ public sealed class CatalogService(
 
                 return Error.Validation(
                     "Catalog.HierarchyRuleViolation",
-                    "The requested category hierarchy exceeds the allowed depth limit.");
+                    $"The requested category hierarchy exceeds the maximum depth limit of {MaxTreeDepth} levels.");
             }
 
             level = parent.Level + 1;
@@ -92,20 +128,27 @@ public sealed class CatalogService(
         if (nameExistsAtSameLevel)
         {
             logger.LogWarning(
-                "Category creation rejected due to duplicate name under parent {ParentId}",
+                "Category creation rejected due to duplicate name '{CategoryName}' under parent {ParentId}",
+                normalizedName,
                 dto.ParentCategoryId);
 
             return Error.Conflict(
                 "Catalog.DuplicateConflict",
-                "A category with this code or name already exists.");
+                "A category with this name already exists at the same hierarchy level.");
         }
 
-        var entity = dto.ToEntity();
-        entity.Code = normalizedCode;
-        entity.Name = normalizedName;
-        entity.Level = level;
-        entity.IsActive = true;
-        entity.CreatedAtUtc = DateTimeOffset.UtcNow;
+        var now = DateTimeOffset.UtcNow;
+        var entity = new ProductCategory
+        {
+            Code = normalizedCode,
+            Name = normalizedName,
+            Description = normalizedDescription,
+            ParentCategoryId = dto.ParentCategoryId,
+            Level = level,
+            IsActive = true,
+            AttributeSchema = schema,
+            CreatedAtUtc = now
+        };
 
         dbContext.ProductCategories.Add(entity);
 
@@ -113,11 +156,11 @@ public sealed class CatalogService(
         {
             await dbContext.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException ex)
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
         {
             logger.LogWarning(
                 ex,
-                "Database constraint conflict while creating category {CategoryCode}",
+                "Database unique constraint conflict while creating category {CategoryCode}",
                 normalizedCode);
 
             return Error.Conflict(
@@ -125,13 +168,16 @@ public sealed class CatalogService(
                 "A category with this code or name already exists.");
         }
 
-        await InvalidateCatalogCacheAsync(ct);
+        await catalogCache.RefreshProactivelyAsync(ct);
 
         logger.LogInformation(
             "Created product category {CategoryId} ({CategoryCode}) at Level {Level}",
             entity.Id,
             entity.Code,
             entity.Level);
+
+        var snapshot = await catalogCache.GetSnapshotAsync(ct);
+        snapshot.EffectiveSchemaById.TryGetValue(entity.Id, out var effectiveSchema);
 
         return new CategoryDetailsDto(
             entity.Id,
@@ -145,7 +191,11 @@ public sealed class CatalogService(
             parentName,
             SubCategoriesCount: 0,
             entity.CreatedAtUtc,
-            entity.UpdatedAtUtc);
+            entity.UpdatedAtUtc)
+        {
+            OwnAttributes = MapSchemaToDtos(entity.AttributeSchema),
+            EffectiveSchema = effectiveSchema
+        };
     }
 
     public async Task<Result<IReadOnlyList<CategoryTreeNodeDto>>> GetCategoryTreeAsync(
@@ -155,35 +205,10 @@ public sealed class CatalogService(
         using var activity = ActivitySource.StartActivity(nameof(GetCategoryTreeAsync));
         activity?.SetTag("catalog.include_inactive", includeInactive);
 
-        var cacheKey = includeInactive ? AllTreeCacheKey : ActiveTreeCacheKey;
+        var snapshot = await catalogCache.GetSnapshotAsync(ct);
+        var tree = includeInactive ? snapshot.AllTree : snapshot.ActiveTree;
 
-        var tree = await cache.GetOrSetAsync<IReadOnlyList<CategoryTreeNodeDto>>(
-            cacheKey,
-            async (ctx, token) =>
-            {
-                var query = dbContext.ProductCategories.AsNoTracking();
-
-                if (!includeInactive)
-                {
-                    query = query.Where(c => c.IsActive);
-                }
-
-                var flatNodes = await query
-                    .OrderBy(c => c.Level)
-                    .ThenBy(c => c.Name)
-                    .ProjectToFlatNodes()
-                    .ToListAsync(token);
-
-                return BuildTreeInMemory(flatNodes);
-            },
-            options => options
-                .SetDuration(TimeSpan.FromMinutes(10))
-                .SetFailSafe(true, TimeSpan.FromHours(1))
-                .SetFactoryTimeouts(TimeSpan.FromMilliseconds(300), TimeSpan.FromSeconds(5)),
-            tags: [CatalogTreeTag],
-            token: ct);
-
-        return Result<IReadOnlyList<CategoryTreeNodeDto>>.Success(tree);
+        return Result.Success(tree);
     }
 
     public async Task<Result<CategoryDetailsDto>> GetCategoryByIdAsync(
@@ -200,10 +225,49 @@ public sealed class CatalogService(
         {
             return Error.NotFound(
                 "Catalog.CategoryNotFound",
-                "The requested category was not found.");
+                $"Product category with ID '{id}' was not found.");
         }
 
-        return dto;
+        var snapshot = await catalogCache.GetSnapshotAsync(ct);
+        IReadOnlyList<AttributeDefinitionDto>? ownAttributes = null;
+        if (snapshot.ById.TryGetValue(id, out var cachedNode))
+        {
+            ownAttributes = MapSchemaToDtos(cachedNode.AttributeSchema);
+        }
+
+        snapshot.EffectiveSchemaById.TryGetValue(id, out var effectiveSchema);
+
+        return dto with
+        {
+            OwnAttributes = ownAttributes,
+            EffectiveSchema = effectiveSchema
+        };
+    }
+
+    public async Task<Result<EffectiveCategorySchemaDto>> GetEffectiveSchemaAsync(
+        int categoryId,
+        CancellationToken ct = default)
+    {
+        using var activity = ActivitySource.StartActivity(nameof(GetEffectiveSchemaAsync));
+        activity?.SetTag("catalog.category_id", categoryId);
+
+        var snapshot = await catalogCache.GetSnapshotAsync(ct);
+
+        if (!snapshot.ById.ContainsKey(categoryId))
+        {
+            return Error.NotFound(
+                "Catalog.CategoryNotFound",
+                $"Product category with ID '{categoryId}' was not found.");
+        }
+
+        if (!snapshot.EffectiveSchemaById.TryGetValue(categoryId, out var effectiveSchema) || effectiveSchema is null)
+        {
+            return Error.Validation(
+                "Catalog.MissingEffectiveSchema",
+                $"No attribute schema could be resolved for category '{categoryId}'.");
+        }
+
+        return effectiveSchema;
     }
 
     public async Task<Result<CategoryDetailsDto>> UpdateCategoryAsync(
@@ -211,6 +275,11 @@ public sealed class CatalogService(
         UpdateCategoryDto dto,
         CancellationToken ct = default)
     {
+        using var activity = ActivitySource.StartActivity(nameof(UpdateCategoryAsync));
+
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            return Error.Validation("Catalog.InvalidName", "Category name is required.");
+
         var category = await dbContext.ProductCategories
             .FirstOrDefaultAsync(c => c.Id == id, ct);
 
@@ -218,7 +287,15 @@ public sealed class CatalogService(
         {
             return Error.NotFound(
                 "Catalog.CategoryNotFound",
-                "The requested category was not found.");
+                $"Product category with ID '{id}' was not found.");
+        }
+
+        if (!category.IsActive)
+        {
+            logger.LogWarning("Category update rejected for inactive category {CategoryId}", id);
+            return Error.Failure(
+                "Catalog.InactiveCategoryLocked",
+                $"Category '{id}' is currently inactive and cannot be modified until it is activated.");
         }
 
         var normalizedName = dto.Name.Trim();
@@ -239,7 +316,49 @@ public sealed class CatalogService(
 
             return Error.Conflict(
                 "Catalog.DuplicateConflict",
-                "A category with this code or name already exists.");
+                "A category with this name already exists at the same hierarchy level.");
+        }
+
+        if (category.ParentCategoryId is null)
+        {
+            if (dto.Attributes is null || dto.Attributes.Count == 0)
+            {
+                return Error.Validation(
+                    "Catalog.RootSchemaRequired",
+                    "A root category must define at least one custom attribute in its schema.");
+            }
+
+            var newSchemaResult = BuildValidatedSchema(dto.Attributes);
+            if (newSchemaResult.IsFailure)
+                return newSchemaResult.Error;
+
+            var newSchema = newSchemaResult.Value;
+
+            if (category.AttributeSchema is not null)
+            {
+                var subtree = await dbContext.GetCategorySubtreeAsync(id, CteRecursionGuard, ct);
+                var subtreeIds = subtree.Select(c => c.Id).ToList();
+
+                var compatibilityResult = await ValidateSchemaEvolutionAsync(
+                    category.Id,
+                    category.Code,
+                    category.AttributeSchema,
+                    newSchema,
+                    subtreeIds,
+                    dto.ForceBreakingChanges,
+                    ct);
+
+                if (compatibilityResult.IsFailure)
+                    return compatibilityResult.Error;
+            }
+
+            category.AttributeSchema = newSchema;
+        }
+        else if (dto.Attributes is { Count: > 0 })
+        {
+            return Error.Validation(
+                "Catalog.SubCategorySchemaForbidden",
+                "Subcategories inherit their attribute schema from the root category and cannot define their own schema.");
         }
 
         category.Name = normalizedName;
@@ -250,37 +369,19 @@ public sealed class CatalogService(
         {
             await dbContext.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException ex)
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
         {
-            logger.LogWarning(ex, "Database conflict while updating category {CategoryId}", id);
+            logger.LogWarning(ex, "Database unique constraint conflict while updating category {CategoryId}", id);
             return Error.Conflict(
                 "Catalog.DuplicateConflict",
-                "A category with this code or name already exists.");
+                "A category with this name already exists at the same hierarchy level.");
         }
 
-        await InvalidateCatalogCacheAsync(ct);
+        await catalogCache.RefreshProactivelyAsync(ct);
 
         logger.LogInformation("Updated product category {CategoryId} ({CategoryCode})", category.Id, category.Code);
 
-        var updatedDto = await dbContext.ProductCategories
-            .AsNoTracking()
-            .Where(c => c.Id == id)
-            .ProjectToDetailsDto()
-            .FirstOrDefaultAsync(ct);
-
-        return updatedDto ?? new CategoryDetailsDto(
-            category.Id,
-            category.Code,
-            category.Name,
-            category.Description,
-            category.Level,
-            category.IsActive,
-            category.ParentCategoryId,
-            ParentCategoryCode: null,
-            ParentCategoryName: null,
-            SubCategoriesCount: 0,
-            category.CreatedAtUtc,
-            category.UpdatedAtUtc);
+        return await GetCategoryByIdAsync(id, ct);
     }
 
     public async Task<Result<CategoryDetailsDto>> MoveCategoryAsync(
@@ -297,12 +398,13 @@ public sealed class CatalogService(
             logger.LogWarning("Category move rejected for {CategoryId}: self-parent assignment attempted", id);
             return Error.Conflict(
                 "Catalog.InvalidHierarchy",
-                "The category cannot be moved to the specified parent.");
+                "A category cannot be assigned as its own parent.");
         }
 
         var newLevel = 1;
         string? newParentCode = null;
         string? newParentName = null;
+        int? newRootId = null;
 
         if (newParentCategoryId.HasValue)
         {
@@ -322,7 +424,7 @@ public sealed class CatalogService(
 
                 return Error.Conflict(
                     "Catalog.InvalidHierarchy",
-                    "The category cannot be moved to the specified parent.");
+                    "The target parent category does not exist or is currently inactive.");
             }
 
             if (ancestors.Any(a => a.Id == id))
@@ -334,12 +436,13 @@ public sealed class CatalogService(
 
                 return Error.Conflict(
                     "Catalog.InvalidHierarchy",
-                    "The category cannot be moved to the specified parent.");
+                    "Circular hierarchy detected: a category cannot be moved under one of its descendants.");
             }
 
             newLevel = newParent.Level + 1;
             newParentCode = newParent.Code;
             newParentName = newParent.Name;
+            newRootId = ancestors.FirstOrDefault(a => a.ParentCategoryId is null)?.Id;
         }
 
         CategoryDetailsDto? movedDetails = null;
@@ -357,7 +460,31 @@ public sealed class CatalogService(
             {
                 domainError = Error.NotFound(
                     "Catalog.CategoryNotFound",
-                    "The requested category was not found.");
+                    $"Product category with ID '{id}' was not found.");
+                return;
+            }
+
+            if (!targetEntity.IsActive)
+            {
+                domainError = Error.Failure(
+                    "Catalog.InactiveCategoryLocked",
+                    $"Category '{id}' is currently inactive and cannot be moved until it is activated.");
+                return;
+            }
+
+            if (targetEntity.ParentCategoryId is null && newParentCategoryId.HasValue)
+            {
+                domainError = Error.Conflict(
+                    "Catalog.InvalidHierarchy",
+                    "A root category owns an attribute schema and cannot be moved under another category.");
+                return;
+            }
+
+            if (targetEntity.ParentCategoryId.HasValue && newParentCategoryId is null)
+            {
+                domainError = Error.Conflict(
+                    "Catalog.InvalidHierarchy",
+                    "A subcategory cannot be promoted to a root category without defining a root attribute schema.");
                 return;
             }
 
@@ -381,6 +508,28 @@ public sealed class CatalogService(
                 return;
             }
 
+            if (targetEntity.ParentCategoryId.HasValue && newRootId.HasValue)
+            {
+                var currentAncestors = await dbContext.GetCategoryAncestorsAsync(id, CteRecursionGuard, token);
+                var currentRootId = currentAncestors.FirstOrDefault(a => a.ParentCategoryId is null)?.Id;
+
+                if (currentRootId != newRootId)
+                {
+                    var subtreeIds = subtreeEntities.Select(c => c.Id).ToList();
+                    var hasProducts = await dbContext.Products
+                        .AsNoTracking()
+                        .AnyAsync(p => subtreeIds.Contains(p.CategoryId), token);
+
+                    if (hasProducts)
+                    {
+                        domainError = Error.Conflict(
+                            "Catalog.SchemaInheritanceConflict",
+                            "Cannot move this subcategory to a different root category because products are already assigned under it.");
+                        return;
+                    }
+                }
+            }
+
             var nameConflict = await dbContext.ProductCategories
                 .AsNoTracking()
                 .AnyAsync(c =>
@@ -397,7 +546,7 @@ public sealed class CatalogService(
 
                 domainError = Error.Conflict(
                     "Catalog.DuplicateConflict",
-                    "A category with this code or name already exists.");
+                    "A category with this name already exists at the target hierarchy level.");
                 return;
             }
 
@@ -413,7 +562,7 @@ public sealed class CatalogService(
 
                     domainError = Error.Validation(
                         "Catalog.HierarchyRuleViolation",
-                        "The requested category hierarchy exceeds the allowed depth limit.");
+                        $"Moving this category would exceed the maximum hierarchy depth limit of {MaxTreeDepth} levels.");
                     return;
                 }
             }
@@ -436,12 +585,12 @@ public sealed class CatalogService(
             {
                 await dbContext.SaveChangesAsync(token);
             }
-            catch (DbUpdateException ex)
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
             {
                 logger.LogWarning(ex, "Database constraint conflict while moving category {CategoryId}", id);
                 domainError = Error.Conflict(
                     "Catalog.DuplicateConflict",
-                    "A category with this code or name already exists.");
+                    "A category with this name already exists at the target hierarchy level.");
                 return;
             }
 
@@ -461,11 +610,12 @@ public sealed class CatalogService(
         }, ct);
 
         if (domainError is not null)
-        {
             return domainError;
-        }
 
-        await InvalidateCatalogCacheAsync(ct);
+        await catalogCache.RefreshProactivelyAsync(ct);
+
+        var snapshot = await catalogCache.GetSnapshotAsync(ct);
+        snapshot.EffectiveSchemaById.TryGetValue(id, out var effectiveSchema);
 
         logger.LogInformation(
             "Moved category {CategoryId} ({CategoryCode}) to parent {NewParentId} at Level {NewLevel}",
@@ -474,7 +624,13 @@ public sealed class CatalogService(
             newParentCategoryId,
             newLevel);
 
-        return movedDetails;
+        return movedDetails with
+        {
+            OwnAttributes = snapshot.ById.TryGetValue(id, out var node)
+                ? MapSchemaToDtos(node.AttributeSchema)
+                : null,
+            EffectiveSchema = effectiveSchema
+        };
     }
 
     public async Task<Result> DeactivateCategoryAsync(int id, CancellationToken ct = default)
@@ -486,13 +642,11 @@ public sealed class CatalogService(
         {
             return Error.NotFound(
                 "Catalog.CategoryNotFound",
-                "The requested category was not found.");
+                $"Product category with ID '{id}' was not found.");
         }
 
         if (!category.IsActive)
-        {
             return Result.Success();
-        }
 
         var hasActiveChildren = await dbContext.ProductCategories
             .AsNoTracking()
@@ -506,15 +660,31 @@ public sealed class CatalogService(
                 category.Code);
 
             return Error.Conflict(
-                "Catalog.InvalidHierarchy",
-                "Cannot deactivate this category while it still has active sub-categories.");
+                "Catalog.HasActiveSubCategories",
+                "Cannot deactivate this category while it still has active subcategories.");
+        }
+
+        var hasAssignedProducts = await dbContext.Products
+            .AsNoTracking()
+            .AnyAsync(p => p.CategoryId == id, ct);
+
+        if (hasAssignedProducts)
+        {
+            logger.LogWarning(
+                "Deactivation blocked for category {CategoryId} ({CategoryCode}): assigned products exist",
+                category.Id,
+                category.Code);
+
+            return Error.Conflict(
+                "Catalog.HasAssignedProducts",
+                "Cannot deactivate this category while products are still assigned to it.");
         }
 
         category.IsActive = false;
         category.UpdatedAtUtc = DateTimeOffset.UtcNow;
 
         await dbContext.SaveChangesAsync(ct);
-        await InvalidateCatalogCacheAsync(ct);
+        await catalogCache.RefreshProactivelyAsync(ct);
 
         logger.LogInformation("Deactivated product category {CategoryId} ({CategoryCode})", category.Id, category.Code);
 
@@ -531,13 +701,11 @@ public sealed class CatalogService(
         {
             return Error.NotFound(
                 "Catalog.CategoryNotFound",
-                "The requested category was not found.");
+                $"Product category with ID '{id}' was not found.");
         }
 
         if (category.IsActive)
-        {
             return Result.Success();
-        }
 
         if (category.ParentCategory is not null && !category.ParentCategory.IsActive)
         {
@@ -548,80 +716,187 @@ public sealed class CatalogService(
                 category.ParentCategory.Id);
 
             return Error.Conflict(
-                "Catalog.InvalidHierarchy",
-                "Cannot assign or activate under an inactive parent category.");
+                "Catalog.ParentInactive",
+                "Cannot activate a subcategory while its parent category is inactive.");
         }
 
         category.IsActive = true;
         category.UpdatedAtUtc = DateTimeOffset.UtcNow;
 
         await dbContext.SaveChangesAsync(ct);
-        await InvalidateCatalogCacheAsync(ct);
+        await catalogCache.RefreshProactivelyAsync(ct);
 
         logger.LogInformation("Activated product category {CategoryId} ({CategoryCode})", category.Id, category.Code);
 
         return Result.Success();
     }
 
-    private static IReadOnlyList<CategoryTreeNodeDto> BuildTreeInMemory(
-        IReadOnlyList<CategoryFlatNodeDto> flatNodes)
+
+    private static Result<CategoryAttributeSchema> BuildValidatedSchema(
+        IReadOnlyList<AttributeDefinitionDto> attributeDtos)
     {
-        if (flatNodes.Count == 0)
+        try
         {
-            return [];
+            var definitions = attributeDtos
+                .Select(a => new CategoryAttributeDefinition(
+                    a.Key,
+                    a.Label,
+                    a.DataType,
+                    a.IsRequired,
+                    a.Unit,
+                    a.AllowedValues))
+                .ToList();
+
+            return new CategoryAttributeSchema(definitions);
         }
-
-        var builders = new Dictionary<int, MutableTreeNode>(flatNodes.Count);
-        var roots = new List<MutableTreeNode>();
-
-        foreach (var node in flatNodes)
+        catch (ArgumentException ex)
         {
-            builders[node.Id] = new MutableTreeNode(node);
+            return Error.Validation("Catalog.InvalidSchema", ex.Message);
         }
+    }
 
-        foreach (var node in flatNodes)
+    private async Task<Result> ValidateSchemaEvolutionAsync(
+         int categoryId,
+         string categoryCode,
+         CategoryAttributeSchema existingSchema,
+         CategoryAttributeSchema newSchema,
+         IReadOnlyCollection<int> subtreeIds,
+         bool forceBreakingChanges,
+         CancellationToken ct)
+    {
+        var oldByKey = existingSchema.Attributes.ToDictionary(
+            a => a.Key,
+            StringComparer.OrdinalIgnoreCase);
+
+        var newByKey = newSchema.Attributes.ToDictionary(
+            a => a.Key,
+            StringComparer.OrdinalIgnoreCase);
+
+        var breakingReasons = new List<string>();
+
+        foreach (var oldAttr in existingSchema.Attributes)
         {
-            var current = builders[node.Id];
-
-            if (node.ParentCategoryId.HasValue &&
-                builders.TryGetValue(node.ParentCategoryId.Value, out var parentBuilder))
+            if (!newByKey.TryGetValue(oldAttr.Key, out var newAttr))
             {
-                parentBuilder.Children.Add(current);
+                var affectedCount = await dbContext.CountProductsWithAttributeKeyAsync(
+                    subtreeIds,
+                    oldAttr.Key,
+                    ct);
+
+                if (affectedCount > 0)
+                {
+                    breakingReasons.Add(
+                        $"Attribute '{oldAttr.Key}' is currently populated on {affectedCount} product(s).");
+                }
+
+                continue;
             }
-            else
+
+            if (newAttr.DataType != oldAttr.DataType)
             {
-                roots.Add(current);
+                var affectedCount = await dbContext.CountProductsWithAttributeKeyAsync(
+                    subtreeIds,
+                    oldAttr.Key,
+                    ct);
+
+                if (affectedCount > 0)
+                {
+                    breakingReasons.Add(
+                        $"Changing data type of '{oldAttr.Key}' from '{oldAttr.DataType}' to '{newAttr.DataType}' affects {affectedCount} existing product(s).");
+                }
+            }
+
+            if (!oldAttr.IsRequired && newAttr.IsRequired)
+            {
+                var totalProducts = await dbContext.Products
+                    .AsNoTracking()
+                    .CountAsync(p => subtreeIds.Contains(p.CategoryId), ct);
+
+                var populatedCount = await dbContext.CountProductsWithAttributeKeyAsync(
+                    subtreeIds,
+                    oldAttr.Key,
+                    ct);
+
+                var missingCount = totalProducts - populatedCount;
+                if (missingCount > 0)
+                {
+                    breakingReasons.Add(
+                        $"Making '{oldAttr.Key}' required leaves {missingCount} existing product(s) without a value.");
+                }
+            }
+
+            if (oldAttr.AllowedValues is { Count: > 0 } && newAttr.AllowedValues is { Count: > 0 })
+            {
+                var newAllowedSet = new HashSet<string>(newAttr.AllowedValues, StringComparer.OrdinalIgnoreCase);
+                foreach (var removedValue in oldAttr.AllowedValues.Where(v => !newAllowedSet.Contains(v)))
+                {
+                    var affectedCount = await dbContext.CountProductsWithAttributeValueAsync(
+                        subtreeIds,
+                        oldAttr.Key,
+                        removedValue,
+                        ct);
+
+                    if (affectedCount > 0)
+                    {
+                        breakingReasons.Add(
+                            $"Allowed value '{removedValue}' on '{oldAttr.Key}' is used by {affectedCount} existing product(s).");
+                    }
+                }
             }
         }
 
-        return roots.Select(ToImmutableDto).ToList();
+        foreach (var newAttr in newSchema.Attributes.Where(a => !oldByKey.ContainsKey(a.Key)))
+        {
+            if (newAttr.IsRequired)
+            {
+                var existingProductsCount = await dbContext.Products
+                    .AsNoTracking()
+                    .CountAsync(p => subtreeIds.Contains(p.CategoryId), ct);
+
+                if (existingProductsCount > 0)
+                {
+                    breakingReasons.Add(
+                        $"New required attribute '{newAttr.Key}' will not be present on {existingProductsCount} existing product(s).");
+                }
+            }
+        }
+
+        if (breakingReasons.Count == 0)
+            return Result.Success();
+
+        if (!forceBreakingChanges)
+        {
+            return Error.Conflict(
+                "Catalog.SchemaBreakingChange",
+                $"{string.Join(" ", breakingReasons)} Set 'forceBreakingChanges = true' to confirm and apply this schema update intentionally.");
+        }
+
+        logger.LogWarning(
+            "Manager forced breaking schema changes on category {CategoryId} ({CategoryCode}): {Reasons}",
+            categoryId,
+            categoryCode,
+            string.Join(" | ", breakingReasons));
+
+        return Result.Success();
     }
 
-    private static CategoryTreeNodeDto ToImmutableDto(MutableTreeNode node)
+    private static IReadOnlyList<AttributeDefinitionDto>? MapSchemaToDtos(CategoryAttributeSchema? schema)
     {
-        var children = node.Children.Count == 0
-            ? (IReadOnlyList<CategoryTreeNodeDto>)[]
-            : node.Children.Select(ToImmutableDto).ToList();
+        if (schema is null)
+            return null;
 
-        return new CategoryTreeNodeDto(
-            node.Data.Id,
-            node.Data.Code,
-            node.Data.Name,
-            node.Data.Description,
-            node.Data.Level,
-            node.Data.IsActive,
-            node.Data.ParentCategoryId,
-            children);
+        return schema.Attributes
+            .Select(a => new AttributeDefinitionDto(
+                a.Key,
+                a.Label,
+                a.DataType,
+                a.IsRequired,
+                a.Unit,
+                a.AllowedValues))
+            .ToList()
+            .AsReadOnly();
     }
 
-    private async Task InvalidateCatalogCacheAsync(CancellationToken ct)
-    {
-        await cache.RemoveByTagAsync(CatalogTreeTag, token: ct);
-    }
-
-    private sealed class MutableTreeNode(CategoryFlatNodeDto data)
-    {
-        public CategoryFlatNodeDto Data { get; } = data;
-        public List<MutableTreeNode> Children { get; } = [];
-    }
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+        => ex.InnerException is SqlException { Number: 2601 or 2627 };
 }
