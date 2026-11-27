@@ -1,5 +1,6 @@
-﻿using Finex.Domain.Enums.Catalog;
+﻿using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using Finex.Domain.Enums.Catalog;
 
 namespace Finex.Domain.ValueObjects.Catalog;
 
@@ -11,7 +12,6 @@ public sealed record CategoryAttributeDefinition
     public const int MaxAllowedValuesCount = 50;
     public const int MaxAllowedValueLength = 100;
 
-    // يبدأ بحرف إنجليزي، ويحتوي على حروف إنجليزي وأرقام و _ فقط (آمن تماماً لمسارات SQL JSON)
     private static readonly Regex ValidKeyRegex = new(
         "^[a-zA-Z][a-zA-Z0-9_]{1,49}$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -29,13 +29,14 @@ public sealed record CategoryAttributeDefinition
         Label = string.Empty;
     }
 
+    [JsonConstructor]
     public CategoryAttributeDefinition(
         string key,
         string label,
         AttributeDataType dataType,
         bool isRequired,
         string? unit = null,
-        IEnumerable<string>? allowedValues = null)
+        IReadOnlyList<string>? allowedValues = null)
     {
         if (string.IsNullOrWhiteSpace(key))
             throw new ArgumentException("Attribute key cannot be empty.", nameof(key));

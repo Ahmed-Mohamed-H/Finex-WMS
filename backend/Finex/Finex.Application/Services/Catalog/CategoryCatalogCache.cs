@@ -15,8 +15,7 @@ public sealed class CategoryCatalogCache(
 {
     private const string SnapshotCacheKey = "catalog:categories:snapshot:v1";
 
-    // متطابق مع FinexDiagnostics.ServiceName لضمان التقاط السبانز حتى في الخلفية (Eager Refresh)
-    private static readonly ActivitySource FallbackActivitySource = new("Finex.WMS.API");
+    private static readonly ActivitySource CatalogActivitySource = new("Finex.WMS.API");
 
     private static readonly FusionCacheEntryOptions CacheOptions = new FusionCacheEntryOptions()
         .SetDuration(TimeSpan.FromHours(24))
@@ -154,7 +153,7 @@ public sealed class CategoryCatalogCache(
 
     private static Activity? StartActivity(string operationName)
         => Activity.Current?.Source.StartActivity(operationName, ActivityKind.Internal)
-           ?? FallbackActivitySource.StartActivity(operationName, ActivityKind.Internal);
+           ?? CatalogActivitySource.StartActivity(operationName, ActivityKind.Internal);
 
     public void Dispose()
     {

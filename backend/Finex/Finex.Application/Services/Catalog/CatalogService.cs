@@ -20,7 +20,7 @@ public sealed class CatalogService(
     private const int MaxTreeDepth = 20;
     private const int CteRecursionGuard = 100;
 
-    private static readonly ActivitySource FallbackActivitySource = new("Finex.WMS.API");
+    private static readonly ActivitySource CatalogActivitySource = new("Finex.WMS.API");
 
     public async Task<Result<IReadOnlyList<CategoryFlatNodeDto>>> GetCategoriesAsync(
         bool includeInactive = false,
@@ -1293,7 +1293,7 @@ public sealed class CatalogService(
 
     private static Activity? StartActivity(string operationName)
         => Activity.Current?.Source.StartActivity(operationName, ActivityKind.Internal)
-           ?? FallbackActivitySource.StartActivity(operationName, ActivityKind.Internal);
+           ?? CatalogActivitySource.StartActivity(operationName, ActivityKind.Internal);
 
     private static bool IsUniqueConstraintViolation(DbUpdateException ex)
         => ex.InnerException is SqlException { Number: 2601 or 2627 };
