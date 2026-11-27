@@ -14,6 +14,7 @@ namespace Finex.Application
             services.AddScoped<IProductionShiftService, ProductionShiftService>();
             services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
             services.AddScoped<ICatalogService, CatalogService>();
+            services.AddSingleton<ICategoryCatalogCache, CategoryCatalogCache>();
             return services;
         }
     }
