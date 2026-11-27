@@ -1,6 +1,6 @@
-﻿namespace Finex.Application.DTOs.Catalog
-{
-    public sealed record CategoryFlatNodeDto(
+﻿namespace Finex.Application.DTOs.Catalog;
+
+public sealed record CategoryFlatNodeDto(
     int Id,
     string Code,
     string Name,
@@ -8,4 +8,3 @@
     int Level,
     bool IsActive,
     int? ParentCategoryId);
-}

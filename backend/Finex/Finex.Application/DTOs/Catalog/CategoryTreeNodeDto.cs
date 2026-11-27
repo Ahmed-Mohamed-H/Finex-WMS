@@ -1,12 +1,14 @@
-﻿namespace Finex.Application.DTOs.Catalog
+﻿namespace Finex.Application.DTOs.Catalog;
+
+public sealed record CategoryTreeNodeDto(
+    int Id,
+    string Code,
+    string Name,
+    string? Description,
+    int Level,
+    bool IsActive,
+    int? ParentCategoryId,
+    IReadOnlyList<CategoryTreeNodeDto> SubCategories)
 {
-    public sealed record CategoryTreeNodeDto(
-      int Id,
-      string Code,
-      string Name,
-      string? Description,
-      int Level,
-      bool IsActive,
-      int? ParentCategoryId,
-      IReadOnlyList<CategoryTreeNodeDto> Children);
+    public bool HasOwnSchema { get; init; }
 }

@@ -1,16 +1,19 @@
-﻿namespace Finex.Application.DTOs.Catalog
+﻿namespace Finex.Application.DTOs.Catalog;
+
+public sealed record CategoryDetailsDto(
+    int Id,
+    string Code,
+    string Name,
+    string? Description,
+    int Level,
+    bool IsActive,
+    int? ParentCategoryId,
+    string? ParentCategoryCode,
+    string? ParentCategoryName,
+    int SubCategoriesCount,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset? UpdatedAtUtc)
 {
-    public sealed record CategoryDetailsDto(
-     int Id,
-     string Code,
-     string Name,
-     string? Description,
-     int Level,
-     bool IsActive,
-     int? ParentCategoryId,
-     string? ParentCategoryCode,
-     string? ParentCategoryName,
-     int SubCategoriesCount,
-     DateTimeOffset CreatedAtUtc,
-     DateTimeOffset? UpdatedAtUtc);
+    public IReadOnlyList<AttributeDefinitionDto>? OwnAttributes { get; init; }
+    public EffectiveCategorySchemaDto? EffectiveSchema { get; init; }
 }

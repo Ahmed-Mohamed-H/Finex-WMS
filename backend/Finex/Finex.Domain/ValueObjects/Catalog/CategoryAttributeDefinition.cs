@@ -1,66 +1,96 @@
-﻿using Finex.Domain.Enums.Catalog;
-using System;
-using System.Collections.Generic;
-using System.Text;
+﻿using System.Text.RegularExpressions;
+using Finex.Domain.Enums.Catalog;
 
-namespace Finex.Domain.ValueObjects.Catalog
+namespace Finex.Domain.ValueObjects.Catalog;
+
+public sealed record CategoryAttributeDefinition
 {
-    public sealed record CategoryAttributeDefinition
+    public const int MaxKeyLength = 50;
+    public const int MaxLabelLength = 100;
+    public const int MaxUnitLength = 20;
+    public const int MaxAllowedValuesCount = 50;
+    public const int MaxAllowedValueLength = 100;
+
+    // يبدأ بحرف إنجليزي، ويحتوي على حروف إنجليزي وأرقام و _ فقط (آمن تماماً لمسارات SQL JSON)
+    private static readonly Regex ValidKeyRegex = new(
+        "^[a-zA-Z][a-zA-Z0-9_]{1,49}$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    public string Key { get; }
+    public string Label { get; }
+    public AttributeDataType DataType { get; }
+    public bool IsRequired { get; }
+    public string? Unit { get; }
+    public IReadOnlyList<string>? AllowedValues { get; }
+
+    private CategoryAttributeDefinition()
     {
-        public string Key { get; }
+        Key = string.Empty;
+        Label = string.Empty;
+    }
 
-        public string Label { get; }
+    public CategoryAttributeDefinition(
+        string key,
+        string label,
+        AttributeDataType dataType,
+        bool isRequired,
+        string? unit = null,
+        IEnumerable<string>? allowedValues = null)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            throw new ArgumentException("Attribute key cannot be empty.", nameof(key));
 
-        public AttributeDataType DataType { get; }
+        var trimmedKey = key.Trim();
+        if (trimmedKey.Length > MaxKeyLength || !ValidKeyRegex.IsMatch(trimmedKey))
+            throw new ArgumentException(
+                $"Attribute key '{trimmedKey}' must be 2-{MaxKeyLength} chars, start with an English letter, and contain only letters, numbers, or underscores.",
+                nameof(key));
 
-        public bool IsRequired { get; }
+        if (string.IsNullOrWhiteSpace(label))
+            throw new ArgumentException("Attribute label cannot be empty.", nameof(label));
 
-        public string? Unit { get; }
+        var trimmedLabel = label.Trim();
+        if (trimmedLabel.Length > MaxLabelLength)
+            throw new ArgumentException($"Attribute label cannot exceed {MaxLabelLength} characters.", nameof(label));
 
-        public IReadOnlyList<string>? AllowedValues { get; }
+        if (!Enum.IsDefined(dataType))
+            throw new ArgumentOutOfRangeException(nameof(dataType), "Invalid attribute data type.");
 
-        private CategoryAttributeDefinition()
+        string? trimmedUnit = null;
+        if (!string.IsNullOrWhiteSpace(unit))
         {
-            Key = string.Empty;
-            Label = string.Empty;
+            trimmedUnit = unit.Trim();
+            if (trimmedUnit.Length > MaxUnitLength)
+                throw new ArgumentException($"Attribute unit cannot exceed {MaxUnitLength} characters.", nameof(unit));
         }
 
-        public CategoryAttributeDefinition(
-            string key,
-            string label,
-            AttributeDataType dataType,
-            bool isRequired,
-            string? unit = null,
-            IEnumerable<string>? allowedValues = null)
+        Key = trimmedKey;
+        Label = trimmedLabel;
+        DataType = dataType;
+        IsRequired = isRequired;
+        Unit = trimmedUnit;
+
+        if (allowedValues is not null)
         {
-            if (string.IsNullOrWhiteSpace(key))
-                throw new ArgumentException("Attribute key cannot be null or whitespace.", nameof(key));
+            if (dataType != AttributeDataType.String)
+                throw new ArgumentException("AllowedValues can only be defined for String attributes.", nameof(allowedValues));
 
-            if (string.IsNullOrWhiteSpace(label))
-                throw new ArgumentException("Attribute label cannot be null or whitespace.", nameof(label));
+            var normalizedAllowed = allowedValues
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Select(v => v.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-            if (!Enum.IsDefined(dataType))
-                throw new ArgumentOutOfRangeException(nameof(dataType), "Invalid attribute data type.");
+            if (normalizedAllowed.Count == 0)
+                throw new ArgumentException("AllowedValues cannot be empty when specified.", nameof(allowedValues));
 
-            Key = key.Trim();
-            Label = label.Trim();
-            DataType = dataType;
-            IsRequired = isRequired;
-            Unit = string.IsNullOrWhiteSpace(unit) ? null : unit.Trim();
+            if (normalizedAllowed.Count > MaxAllowedValuesCount)
+                throw new ArgumentException($"AllowedValues cannot exceed {MaxAllowedValuesCount} options.", nameof(allowedValues));
 
-            if (allowedValues is not null)
-            {
-                var normalizedAllowed = allowedValues
-                    .Where(v => !string.IsNullOrWhiteSpace(v))
-                    .Select(v => v.Trim())
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+            if (normalizedAllowed.Any(v => v.Length > MaxAllowedValueLength))
+                throw new ArgumentException($"Each option in AllowedValues cannot exceed {MaxAllowedValueLength} characters.", nameof(allowedValues));
 
-                if (normalizedAllowed.Count == 0)
-                    throw new ArgumentException("AllowedValues cannot be empty when specified.", nameof(allowedValues));
-
-                AllowedValues = normalizedAllowed.AsReadOnly();
-            }
+            AllowedValues = normalizedAllowed.AsReadOnly();
         }
     }
 }
