@@ -1,5 +1,4 @@
-﻿using System;
-using Microsoft.EntityFrameworkCore.Migrations;
+﻿using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -109,7 +108,6 @@ namespace Finex.Infrastructure.Persistence.Migrations
             migrationBuilder.DropColumn(
                 name: "AttributeSchema",
                 table: "ProductCategories");
-
         }
     }
 }

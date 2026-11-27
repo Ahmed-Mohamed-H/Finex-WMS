@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Finex.Domain.Enums.Catalog
+﻿namespace Finex.Domain.Enums.Catalog
 {
     public enum PackagingType
     {
@@ -16,5 +12,4 @@ namespace Finex.Domain.Enums.Catalog
         Bundle = 8,       // Multi-unit bundle or pack (e.g., 4 or 6 rolls)
         Unit = 9          // Single device or dispenser unit
     }
-
 }

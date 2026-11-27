@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Finex.Domain.Enums.Catalog
+﻿namespace Finex.Domain.Enums.Catalog
 {
     public enum StorageZoneType
     {
@@ -13,5 +9,4 @@ namespace Finex.Domain.Enums.Catalog
         CleanroomDustFree = 5,      // Dust- and lint-isolated environment (lint-free wipes for laboratories)
         ElectronicsProtected = 6    // Shock- and moisture-protected storage (automatic and electronic dispensers)
     }
-
 }

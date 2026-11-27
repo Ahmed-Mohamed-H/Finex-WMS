@@ -1,8 +1,5 @@
 ﻿using Finex.Application.DTOs.Catalog;
-using System;
 using System.Collections.Frozen;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Finex.Application.Services.Catalog
 {

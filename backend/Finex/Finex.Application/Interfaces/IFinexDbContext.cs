@@ -10,6 +10,7 @@ public interface IFinexDbContext
     DbSet<ProducedLineSsccBarcode> ProducedLineSsccBarcodes { get; }
     DbSet<ProductCategory> ProductCategories { get; }
     DbSet<Product> Products { get; }
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     Task ExecuteInTransactionAsync(

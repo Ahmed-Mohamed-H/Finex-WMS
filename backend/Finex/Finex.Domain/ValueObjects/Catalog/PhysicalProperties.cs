@@ -1,4 +1,5 @@
 ﻿using Finex.Domain.Enums.Catalog;
+
 namespace Finex.Domain.ValueObjects.Catalog;
 
 public sealed record PhysicalProperties

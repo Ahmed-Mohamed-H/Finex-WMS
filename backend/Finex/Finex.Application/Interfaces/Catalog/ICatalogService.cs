@@ -19,6 +19,7 @@ public interface ICatalogService
     Task<Result> DeleteCategoryAsync(
         int id,
         CancellationToken ct = default);
+
     Task<Result<CategoryDetailsDto>> CreateCategoryAsync(
         CreateCategoryDto dto,
         CancellationToken ct = default);

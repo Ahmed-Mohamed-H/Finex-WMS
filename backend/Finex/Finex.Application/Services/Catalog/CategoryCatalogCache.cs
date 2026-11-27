@@ -1,9 +1,9 @@
-﻿using System.Diagnostics;
-using Finex.Application.Interfaces;
+﻿using Finex.Application.Interfaces;
 using Finex.Application.Interfaces.Catalog;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using ZiggyCreatures.Caching.Fusion;
 
 namespace Finex.Application.Services.Catalog;

@@ -1,5 +1,5 @@
-﻿using System.Text.RegularExpressions;
-using Finex.Domain.Enums.Catalog;
+﻿using Finex.Domain.Enums.Catalog;
+using System.Text.RegularExpressions;
 
 namespace Finex.Domain.ValueObjects.Catalog;
 

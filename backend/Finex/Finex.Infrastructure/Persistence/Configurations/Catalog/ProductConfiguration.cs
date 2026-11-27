@@ -1,9 +1,9 @@
-﻿using System.Text.Json;
-using Finex.Domain.Entities;
+﻿using Finex.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using System.Text.Json;
 
 namespace Finex.Infrastructure.Persistence.Configurations.Catalog;
 
