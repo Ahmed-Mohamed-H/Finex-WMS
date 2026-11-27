@@ -5,6 +5,20 @@ namespace Finex.Application.Interfaces.Catalog;
 
 public interface ICatalogService
 {
+    Task<Result<IReadOnlyList<CategoryFlatNodeDto>>> GetCategoriesAsync(
+        bool includeInactive = false,
+        int? parentCategoryId = null,
+        int? level = null,
+        string? search = null,
+        CancellationToken ct = default);
+
+    Task<Result<CategoryDetailsDto>> GetCategoryByCodeAsync(
+        string code,
+        CancellationToken ct = default);
+
+    Task<Result> DeleteCategoryAsync(
+        int id,
+        CancellationToken ct = default);
     Task<Result<CategoryDetailsDto>> CreateCategoryAsync(
         CreateCategoryDto dto,
         CancellationToken ct = default);
